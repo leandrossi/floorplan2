@@ -1,0 +1,130 @@
+{
+  "fixture_name": "single_room_001",
+  "cell_size_m": 0.5,
+  "width": 10,
+  "height": 8,
+  "security_level": "optimal",
+  "cells": [
+    [
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "wall",
+      "wall",
+      "wall",
+      "door",
+      "door",
+      "wall",
+      "wall",
+      "wall",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "wall",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "wall",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "wall",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "window",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "wall",
+      "indoor",
+      "indoor",
+      "indoor",
+      "heat_source",
+      "indoor",
+      "indoor",
+      "window",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "wall",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "indoor",
+      "wall",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "wall",
+      "wall",
+      "wall",
+      "wall",
+      "wall",
+      "wall",
+      "wall",
+      "wall",
+      "outdoor"
+    ],
+    [
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor",
+      "outdoor"
+    ]
+  ],
+  "rooms": [],
+  "elements": [
+    {
+      "type": "main_entry",
+      "position": [
+        1,
+        5
+      ]
+    },
+    {
+      "type": "electric_board",
+      "position": [
+        4,
+        2
+      ]
+    },
+    {
+      "type": "heat_source",
+      "position": [
+        4,
+        5
+      ]
+    }
+  ],
+  "notes": "Generated from overlay"
+}

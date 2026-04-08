@@ -1,0 +1,53 @@
+{
+  "confidence_thresholds": {
+    "wall": 0.4,
+    "window": 0.6,
+    "door": 0.7,
+    "room": 0.55,
+    "unknown": 1.0
+  },
+  "class_mapping": {
+    "Wall": "wall",
+    "Window": "window",
+    "Door": "door",
+    "diagonal": "wall",
+    "room": "room"
+  },
+  "wall_repair": {
+    "close_gap_px": 6,
+    "remove_small_components_px": 20
+  },
+  "openings": {
+    "wall_support_dilate_px": 2
+  },
+  "barrier_seal": {
+    "close_gap_px": 5,
+    "close_iterations": 1
+  },
+  "exterior_interior_variants": {
+    "alt2_endpoint_bridge": {
+      "max_endpoint_dist_px": 28,
+      "min_abs_dot": 0.88,
+      "line_thickness": 2
+    },
+    "alt3_extend_segments": {
+      "max_extend_px": 40,
+      "line_thickness": 2
+    },
+    "alt4_leak_path": {
+      "max_iterations": 80,
+      "max_path_length": 8000
+    }
+  },
+  "rooms": {
+    "treat_doors_as_closed_for_room_segmentation": true,
+    "min_overlap_ratio": 0.3
+  },
+  "matrix": {
+    "mode": "relative_scale",
+    "cell_size_cm": 5,
+    "cell_size_px": 5,
+    "pixels_per_meter": null,
+    "wall_fill_ratio": 0.2
+  }
+}

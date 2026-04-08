@@ -1,0 +1,27 @@
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+
+images/*.jpg
+images/*.jpeg
+images/*.png
+!images/.gitkeep
+output/
+
+# OS / WSL (NTFS alternate stream copies)
+*Zone.Identifier
+**/*Zone.Identifier
+
+.DS_Store
+Thumbs.db
