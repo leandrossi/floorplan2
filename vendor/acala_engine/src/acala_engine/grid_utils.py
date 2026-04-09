@@ -12,6 +12,23 @@ from typing import Iterable, Iterator, List, Set, Tuple
 from .model import CellType, GridCoord, GridMap
 
 
+def capped_radius_cells(grid: GridMap, radius_m: float, *, max_grid_fraction: float = 0.25) -> float:
+    """
+    Convert a radius in meters to grid cells, capping to avoid absurd values.
+
+    When cell_size_m is a rasterization parameter (not a real-world scale), naive
+    division can yield radii larger than the entire grid.  The cap activates only
+    when the raw radius exceeds ``max_grid_fraction`` of the shorter side — small
+    grids where the raw radius is already reasonable are left untouched.
+    """
+    raw = radius_m / grid.cell_size_m
+    short_side = min(grid.height, grid.width)
+    # Only cap when the raw radius is disproportionate to the grid.
+    if raw > short_side:
+        return max_grid_fraction * short_side
+    return raw
+
+
 def is_inside(grid: GridMap, coord: GridCoord) -> bool:
     """Return True if coord is inside the grid bounds."""
     r, c = coord

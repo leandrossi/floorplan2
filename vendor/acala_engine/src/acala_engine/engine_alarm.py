@@ -30,6 +30,7 @@ from .zones import (
     build_red_zones_for_exterior_openings,
 )
 from .grid_utils import (
+    capped_radius_cells,
     find_all_indoor_components,
     flood_fill_opening_group,
     is_interior_opening_to_outdoor,
@@ -431,7 +432,7 @@ def _suppress_red_zones_for_covered_openings(
 
     # Use the same suppression radius as defined in MagneticRules for this profile.
     rules: MagneticRules = ALARM_RULES[security_level]["magnetic"]  # type: ignore[assignment]
-    radius_cells = rules.suppression_radius_m / grid.cell_size_m
+    radius_cells = capped_radius_cells(grid, rules.suppression_radius_m, max_grid_fraction=0.15)
     influenced: Set[GridCoord] = set()
     for opening in covered_openings:
         for coord in radius_expand(grid, opening, radius_cells=radius_cells, include_center=True):
@@ -469,8 +470,7 @@ def _suppress_red_zones_covered_by_pirs(
     cells = grid.cells
     cell_size = grid.cell_size_m
     pir_rules: PirRules = ALARM_RULES[security_level]["pir"]  # type: ignore[assignment]
-    radius_m = pir_rules.radius_m
-    radius_cells = radius_m / cell_size
+    radius_cells = capped_radius_cells(grid, pir_rules.radius_m, max_grid_fraction=0.40)
 
     # Build indoor connectivity components once for the grid.
     component_ids_by_coord: Dict[GridCoord, int] = {}
@@ -854,9 +854,8 @@ def _place_pirs(
         return
 
     # Motion geometry config (shared for PIR/PIRCAM).
-    radius_m = pir_rules.radius_m
     fov_deg = pir_rules.fov_deg
-    radius_cells = radius_m / cell_size
+    radius_cells = capped_radius_cells(grid, pir_rules.radius_m, max_grid_fraction=0.40)
     half_fov_rad = math.radians(fov_deg / 2.0)
 
     # Build wall-adjacent indoor candidates, track their wall neighbours and corners (2+).
@@ -969,7 +968,7 @@ def _place_pirs(
             kind = "door" if any(CellType(cells[gr][gc]) is CellType.DOOR for gr, gc in group) else "window"
             opening_groups.append((group_set, interior_edge, kind))
 
-    influence_cells = 2.0 / cell_size
+    influence_cells = capped_radius_cells(grid, 2.0, max_grid_fraction=0.15)
     local_max_dist = max(3.0, min(12.0, radius_cells / 4.0))
 
     def _min_dist_to_group(coord: GridCoord, group_set: Set[GridCoord]) -> float:

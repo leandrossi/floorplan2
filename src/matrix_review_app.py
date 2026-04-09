@@ -33,6 +33,20 @@ from review_bundle_io import (  # noqa: E402
     load_approved,
     validate_approved,
 )
+from ui_components import (  # noqa: E402
+    DEVICE_STYLE as _DEVICE_STYLE,
+    STRUCT_RGB as _STRUCT_RGB,
+    alpha_blend as _alpha_blend,
+    compute_pre_suppression_red_mask as _compute_pre_suppression_red_mask,
+    draw_square as _draw_square,
+    effective_struct as _effective_struct,
+    grid_cell_from_display_click as _grid_cell_from_display_click,
+    load_step05_outputs as _load_step05_outputs,
+    overlay_markers as _overlay_markers,
+    render_proposal_views as _render_proposal_views,
+    rgb_from_struct as _rgb_from_struct,
+    upscale_rgb as _upscale_rgb,
+)
 
 try:
     from streamlit_image_coordinates import streamlit_image_coordinates
@@ -47,255 +61,19 @@ except ImportError:
 DEFAULT_BUNDLE = _PROJECT_ROOT / "output" / "final" / "step04" / "review_bundle.json"
 DEFAULT_STEP05_DIR = _PROJECT_ROOT / "output" / "final" / "step05"
 
-# Match final_step04 struct preview colors (BGR-ish order for OpenCV; here RGB for plotly/UI)
-_STRUCT_RGB: dict[int, tuple[int, int, int]] = {
-    0: (200, 200, 255),  # exterior
-    1: (40, 40, 40),  # wall
-    2: (0, 180, 255),  # window
-    3: (0, 100, 0),  # door
-    4: (255, 220, 180),  # interior
-}
-
-_DEVICE_STYLE: dict[str, dict[str, object]] = {
-    "panel": {"code": 10, "rgb": (68, 114, 196), "label": "PB"},
-    "keyboard": {"code": 11, "rgb": (112, 173, 71), "label": "KB"},
-    "magnetic": {"code": 12, "rgb": (255, 192, 0), "label": "MG"},
-    "pir": {"code": 13, "rgb": (255, 87, 34), "label": "PIR"},
-    "siren_indoor": {"code": 14, "rgb": (156, 39, 176), "label": "SI"},
-    "siren_outdoor": {"code": 15, "rgb": (33, 150, 243), "label": "SO"},
-}
-
-
-def _effective_struct(base_np: np.ndarray, patch_map: dict[tuple[int, int], int]) -> np.ndarray:
-    out = base_np.copy()
-    for (r, c), v in patch_map.items():
-        out[r, c] = v
-    return out
-
 
 def _patch_map_to_list(pm: dict[tuple[int, int], int]) -> list[dict[str, int]]:
     return [{"r": r, "c": c, "v": int(v)} for (r, c), v in sorted(pm.items())]
 
 
-def _rgb_from_struct(z: np.ndarray) -> np.ndarray:
-    """H×W×3 RGB image, one pixel per cell (same geometry as floor_like_preview)."""
-    h, w = z.shape
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    for k, col in _STRUCT_RGB.items():
-        rgb[z == k] = col
-    return rgb
-
-
-def _grid_cell_from_display_click(
-    coord: dict,
-    *,
-    native_img_w: int,
-    native_img_h: int,
-    grid_w: int,
-    grid_h: int,
-) -> tuple[int, int] | None:
-    """
-    streamlit_image_coordinates returns x,y in the **rendered** image (width/height pixels).
-    Map through native bitmap size to grid column/row (0-based).
-    """
-    if not coord or "x" not in coord or "y" not in coord:
-        return None
-    if native_img_w <= 0 or native_img_h <= 0:
-        return None
-    disp_w = max(1, int(coord.get("width") or 1))
-    disp_h = max(1, int(coord.get("height") or 1))
-    x_nat = float(coord["x"]) * native_img_w / disp_w
-    y_nat = float(coord["y"]) * native_img_h / disp_h
-    cx = int(x_nat * grid_w / native_img_w)
-    cy = int(y_nat * grid_h / native_img_h)
-    cx = max(0, min(grid_w - 1, cx))
-    cy = max(0, min(grid_h - 1, cy))
-    return cx, cy
-
-
 def _native_png_size(path: Path) -> tuple[int, int] | None:
     try:
         from PIL import Image
-
         with Image.open(path) as im:
             w_px, h_px = im.size
             return int(w_px), int(h_px)
     except Exception:
         return None
-
-
-def _overlay_markers(
-    rgb: np.ndarray,
-    *,
-    main_entry: list[int] | None,
-    electric_board: list[int] | None,
-) -> np.ndarray:
-    out = rgb.copy()
-    if main_entry is not None and len(main_entry) == 2:
-        r, c = int(main_entry[0]), int(main_entry[1])
-        if 0 <= r < out.shape[0] and 0 <= c < out.shape[1]:
-            out[r, c] = (255, 0, 0)
-    if electric_board is not None and len(electric_board) == 2:
-        r, c = int(electric_board[0]), int(electric_board[1])
-        if 0 <= r < out.shape[0] and 0 <= c < out.shape[1]:
-            out[r, c] = (0, 0, 255)
-    return out
-
-
-def _alpha_blend(base: np.ndarray, mask: np.ndarray, color: tuple[int, int, int], alpha: float) -> np.ndarray:
-    out = base.copy().astype(np.float32)
-    c = np.array(color, dtype=np.float32).reshape(1, 1, 3)
-    out[mask] = out[mask] * (1.0 - alpha) + c.reshape(3) * alpha
-    return np.clip(out, 0, 255).astype(np.uint8)
-
-
-def _draw_square(img: np.ndarray, r: int, c: int, color: tuple[int, int, int], radius: int = 1) -> None:
-    h, w, _ = img.shape
-    r0, r1 = max(0, r - radius), min(h - 1, r + radius)
-    c0, c1 = max(0, c - radius), min(w - 1, c + radius)
-    img[r0 : r1 + 1, c0 : c1 + 1] = np.array(color, dtype=np.uint8)
-
-
-def _load_step05_outputs(step05_dir: Path) -> tuple[dict | None, dict | None]:
-    proposal_p = step05_dir / "installation_proposal.json"
-    report_p = step05_dir / "alarm_plan_report.json"
-    proposal = None
-    report = None
-    if proposal_p.is_file():
-        try:
-            proposal = json.loads(proposal_p.read_text(encoding="utf-8"))
-        except Exception:
-            proposal = None
-    if report_p.is_file():
-        try:
-            report = json.loads(report_p.read_text(encoding="utf-8"))
-        except Exception:
-            report = None
-    return proposal, report
-
-
-def _render_proposal_views(
-    eff: np.ndarray,
-    *,
-    proposal: dict | None,
-    show_red_zones: bool,
-    show_devices: bool,
-    replace_base_with_devices: bool,
-) -> tuple[np.ndarray, np.ndarray, dict[str, int], int]:
-    red_img = _rgb_from_struct(eff)
-    dev_img = _rgb_from_struct(eff)
-    device_counts: dict[str, int] = {}
-    red_cells_count = 0
-    if not proposal:
-        return red_img, dev_img, device_counts, red_cells_count
-
-    zones = proposal.get("zones") or []
-    devices = proposal.get("devices") or []
-    h, w = eff.shape
-
-    if show_red_zones:
-        red_mask = np.zeros((h, w), dtype=bool)
-        for z in zones:
-            zt = str(z.get("zone_type") or "").lower()
-            if zt != "red":
-                continue
-            for rc in z.get("cells") or []:
-                if not isinstance(rc, (list, tuple)) or len(rc) != 2:
-                    continue
-                r, c = int(rc[0]), int(rc[1])
-                if 0 <= r < h and 0 <= c < w:
-                    red_mask[r, c] = True
-        red_cells_count = int(red_mask.sum())
-        if red_cells_count > 0:
-            red_img = _alpha_blend(red_img, red_mask, (220, 20, 60), alpha=0.42)
-
-    if show_devices:
-        if replace_base_with_devices:
-            repl = eff.copy()
-            for d in devices:
-                dt = str(d.get("device_type") or "").lower()
-                style = _DEVICE_STYLE.get(dt)
-                cell = d.get("cell") or []
-                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
-                    continue
-                r, c = int(cell[0]), int(cell[1])
-                if 0 <= r < h and 0 <= c < w:
-                    repl[r, c] = int(style["code"])  # type: ignore[index]
-                    device_counts[dt] = device_counts.get(dt, 0) + 1
-            dev_img = _rgb_from_struct(repl)
-            for dt, style in _DEVICE_STYLE.items():
-                code = int(style["code"])  # type: ignore[index]
-                rgb = style["rgb"]  # type: ignore[assignment]
-                dev_img[repl == code] = np.array(rgb, dtype=np.uint8)
-        else:
-            for d in devices:
-                dt = str(d.get("device_type") or "").lower()
-                style = _DEVICE_STYLE.get(dt)
-                cell = d.get("cell") or []
-                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
-                    continue
-                r, c = int(cell[0]), int(cell[1])
-                if 0 <= r < h and 0 <= c < w:
-                    _draw_square(dev_img, r, c, style["rgb"])  # type: ignore[index]
-                    device_counts[dt] = device_counts.get(dt, 0) + 1
-
-    return red_img, dev_img, device_counts, red_cells_count
-
-
-def _compute_pre_suppression_red_mask(
-    eff: np.ndarray,
-    *,
-    main_entry: list[int] | None,
-    electric_board: list[int] | None,
-    cell_size_m: float,
-    security_level: str = "optimal",
-) -> np.ndarray | None:
-    """
-    Build RED zones directly from exterior openings (before magnetic/PIR suppression),
-    using current effective struct + markers.
-    """
-    try:
-        from acala_engine import build_scenario, make_element
-        from acala_engine.zones import build_red_zones_for_exterior_openings
-    except Exception:
-        return None
-
-    struct_to_acala = {0: -1, 1: 1, 2: 3, 3: 2, 4: 0}
-    cells = [[struct_to_acala[int(v)] for v in row] for row in eff]
-    elements: list = []
-    if main_entry is not None and len(main_entry) == 2:
-        elements.append(
-            make_element(
-                id="elem_main_entry",
-                element_type="main_entry",
-                position=(int(main_entry[0]), int(main_entry[1])),
-            )
-        )
-    if electric_board is not None and len(electric_board) == 2:
-        elements.append(
-            make_element(
-                id="elem_electric_board",
-                element_type="electric_board",
-                position=(int(electric_board[0]), int(electric_board[1])),
-            )
-        )
-    scenario = build_scenario(
-        cells=cells,
-        cell_size_m=float(cell_size_m),
-        security_level=str(security_level),
-        fixture_name="proposal_preview",
-        rooms=[],
-        elements=elements,
-    )
-    zones = build_red_zones_for_exterior_openings(scenario)
-    h, w = eff.shape
-    mask = np.zeros((h, w), dtype=bool)
-    for z in zones:
-        for rc in z.cells:
-            r, c = int(rc[0]), int(rc[1])
-            if 0 <= r < h and 0 <= c < w:
-                mask[r, c] = True
-    return mask
 
 
 def _discrete_struct_colorscale() -> list[list]:
@@ -567,19 +345,19 @@ def main() -> None:
             _rgb_from_struct(eff),
             main_entry=st.session_state.get("main_entry"),
             electric_board=st.session_state.get("electric_board"),
+            marker_radius=2,
         )
+        rgb_up = _upscale_rgb(rgb, int(preview_width))
         if streamlit_image_coordinates is not None:
             coord = streamlit_image_coordinates(
-                rgb,
+                rgb_up,
                 key="preview_coords_live",
-                width=int(preview_width),
             )
             if coord is not None and mode != "View":
-                gh, gw = rgb.shape[0], rgb.shape[1]
                 picked = _grid_cell_from_display_click(
                     coord,
-                    native_img_w=gw,
-                    native_img_h=gh,
+                    native_img_w=rgb_up.shape[1],
+                    native_img_h=rgb_up.shape[0],
                     grid_w=w,
                     grid_h=h,
                 )
@@ -587,7 +365,7 @@ def main() -> None:
                     cx, cy = picked
                     _apply_click(cx, cy, mode, paint_val, w, h, eff)
         else:
-            st.image(rgb, width=int(preview_width))
+            st.image(rgb_up)
             st.warning(
                 "Install `streamlit-image-coordinates` for click-to-place: pip install streamlit-image-coordinates"
             )
@@ -606,8 +384,9 @@ def main() -> None:
             _rgb_from_struct(eff),
             main_entry=st.session_state.get("main_entry"),
             electric_board=st.session_state.get("electric_board"),
+            marker_radius=2,
         )
-        # Placement / paint: raster pick (always reliable vs Plotly selectedData on big grids).
+        rgb_struct_up = _upscale_rgb(rgb_struct, int(struct_map_width))
         if mode != "View":
             if streamlit_image_coordinates is None:
                 st.warning(
@@ -615,18 +394,16 @@ def main() -> None:
                     "pip install streamlit-image-coordinates"
                 )
             else:
-                gh, gw = rgb_struct.shape[0], rgb_struct.shape[1]
                 coord_fs = streamlit_image_coordinates(
-                    rgb_struct,
+                    rgb_struct_up,
                     key="full_struct_raster",
-                    width=int(struct_map_width),
                     cursor="crosshair",
                 )
                 if coord_fs is not None:
                     picked_fs = _grid_cell_from_display_click(
                         coord_fs,
-                        native_img_w=gw,
-                        native_img_h=gh,
+                        native_img_w=rgb_struct_up.shape[1],
+                        native_img_h=rgb_struct_up.shape[0],
                         grid_w=w,
                         grid_h=h,
                     )
@@ -637,8 +414,7 @@ def main() -> None:
             if mode == "View":
                 st.warning("Install plotly for the zoomable chart: pip install plotly")
                 st.image(
-                    rgb_struct,
-                    width=int(struct_map_width),
+                    rgb_struct_up,
                     caption="Struct raster fallback (no axis ticks until plotly is installed).",
                 )
         else:

@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import List, Set
 
 from .grid_utils import (
+    capped_radius_cells,
     flood_fill_opening_group,
     is_interior_opening_to_outdoor,
     iter_neighbors_4,
@@ -49,7 +50,7 @@ def build_red_zones_for_exterior_openings(
     (Chebyshev from the nearest group cell) are included.
     """
     grid = scenario.grid_map
-    radius_cells = influence_depth_m / grid.cell_size_m
+    radius_cells = capped_radius_cells(grid, influence_depth_m, max_grid_fraction=0.15)
 
     zones: List[Zone] = []
     red_index = 1
@@ -130,7 +131,7 @@ def build_prohibited_zones_around_hazards(
       of a PROHIBITED zone.
     """
     grid = scenario.grid_map
-    radius_cells = radius_m / grid.cell_size_m
+    radius_cells = capped_radius_cells(grid, radius_m, max_grid_fraction=0.10)
 
     zones: List[Zone] = []
     prohib_index = 1
