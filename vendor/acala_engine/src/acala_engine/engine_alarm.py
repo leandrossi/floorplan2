@@ -31,12 +31,13 @@ from .zones import (
 )
 from .grid_utils import (
     find_all_indoor_components,
+    flood_fill_opening_group,
     is_interior_opening_to_outdoor,
     is_outdoor_adjacent,
     iter_neighbors_4,
     radius_expand,
 )
-from .alarm_rules import ALARM_RULES, MagneticRules, PirRules
+from .alarm_rules import ALARM_RULES, MagneticRules, PirRules, SirenRules
 
 
 def plan_installation(
@@ -213,17 +214,22 @@ def _place_keyboard(
     if not main.cells:
         return
 
-    r0, c0 = main.cells[0]
-
-    # Prefer first valid 4-neighbour cell just inside from the door.
+    # For thick openings, flood through the door group to find interior-side seeds.
+    _kb_group, _kb_ext, kb_interior_seeds = flood_fill_opening_group(grid, main.cells[0])
     candidate: Optional[GridCoord] = None
-    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-        coord = (r0 + dr, c0 + dc)
-        if is_valid(coord):
-            candidate = coord
+    for seed in kb_interior_seeds:
+        if is_valid(seed):
+            candidate = seed
             break
+    # Fallback: try direct 4-neighbours of the element cell.
+    if candidate is None:
+        r0, c0 = main.cells[0]
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            coord = (r0 + dr, c0 + dc)
+            if is_valid(coord):
+                candidate = coord
+                break
 
-    # Fallback: any valid indoor cell (but we keep this simple for MVP).
     if candidate is None:
         for r in range(grid.height):
             for c in range(grid.width):
@@ -263,18 +269,20 @@ def _collect_exterior_opening_groups(
     """
     Group exterior doors/windows (structural cells) into contiguous opening groups.
 
+    Uses flood_fill_opening_group to handle multi-pixel-thick openings: the full
+    connected DOOR/WINDOW component is collected even when only the outermost row
+    touches OUTDOOR.
+
     Each group has:
     - cells: all door/window coords in the group (4-connected)
-    - kind: "door" or "window" (based on CellType)
-    - representative: single coord where we would prefer to place a magnetic
-      - vertical window/door: top-most cell
-      - horizontal window/door: left-most cell
+    - kind: "door" or "window" (based on CellType of the exterior edge)
+    - representative: cell on the *interior* edge of the group (closest to INDOOR),
+      matching real-world magnetic sensor placement on the inside frame
     - is_main_entry: True if the group contains the main_entry cell
     """
     grid = scenario.grid_map
     cells = grid.cells
 
-    # Lookup main_entry structural cell (if any).
     main_entry_cell: Optional[GridCoord] = None
     main_entries = [
         e
@@ -284,65 +292,53 @@ def _collect_exterior_opening_groups(
     if main_entries:
         main_entry_cell = main_entries[0].cells[0]
 
-    # Collect all exterior opening coords.
-    opening_cells: Set[GridCoord] = set()
-    for r in range(grid.height):
-        for c in range(grid.width):
-            coord = (r, c)
-            if not is_interior_opening_to_outdoor(grid, coord):
-                continue
-            ct = CellType(cells[r][c])
-            if ct in (CellType.DOOR, CellType.WINDOW):
-                opening_cells.add(coord)
-
     groups: List[_OpeningGroup] = []
     visited: Set[GridCoord] = set()
 
-    def neighbors(coord: GridCoord) -> List[GridCoord]:
-        r, c = coord
-        out: List[GridCoord] = []
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            n = (r + dr, c + dc)
-            if n in opening_cells:
-                out.append(n)
-        return out
-
-    for cell in sorted(opening_cells):
-        if cell in visited:
-            continue
-        # BFS for one group.
-        stack = [cell]
-        group_cells: List[GridCoord] = []
-        while stack:
-            cur = stack.pop()
-            if cur in visited:
+    for r in range(grid.height):
+        for c in range(grid.width):
+            coord = (r, c)
+            if coord in visited:
                 continue
-            visited.add(cur)
-            group_cells.append(cur)
-            stack.extend(neighbors(cur))
+            if not is_interior_opening_to_outdoor(grid, coord):
+                continue
 
-        if not group_cells:
-            continue
+            group_cells, ext_edge, interior_seeds = flood_fill_opening_group(grid, coord)
+            visited.update(group_cells)
 
-        # Determine kind from first cell.
-        ct0 = CellType(cells[group_cells[0][0]][group_cells[0][1]])
-        kind = "door" if ct0 is CellType.DOOR else "window"
+            if not group_cells:
+                continue
+            if not ext_edge:
+                continue
 
-        rows = {r for (r, _) in group_cells}
-        cols = {c for (_, c) in group_cells}
+            ct0 = CellType(cells[ext_edge[0][0]][ext_edge[0][1]])
+            kind = "door" if ct0 is CellType.DOOR else "window"
 
-        if len(cols) == 1 and len(rows) > 1:
-            # Vertical segment: pick top-most.
-            rep = min(group_cells, key=lambda rc: (rc[0], rc[1]))
-        elif len(rows) == 1 and len(cols) > 1:
-            # Horizontal segment: pick left-most.
-            rep = min(group_cells, key=lambda rc: (rc[1], rc[0]))
-        else:
-            # Fallback: top-left of the group.
-            rep = min(group_cells, key=lambda rc: (rc[0], rc[1]))
+            # Representative: prefer a cell adjacent to INDOOR (interior edge).
+            # This is where a magnetic sensor physically sits (inside frame).
+            interior_edge = [
+                gc for gc in group_cells
+                if any(
+                    CellType(cells[nr][nc]) is CellType.INDOOR
+                    for nr, nc in [(gc[0]-1, gc[1]), (gc[0]+1, gc[1]),
+                                   (gc[0], gc[1]-1), (gc[0], gc[1]+1)]
+                    if 0 <= nr < grid.height and 0 <= nc < grid.width
+                )
+            ]
+            rep_pool = interior_edge if interior_edge else group_cells
 
-        is_main = main_entry_cell is not None and main_entry_cell in group_cells
-        groups.append(_OpeningGroup(group_cells, kind, rep, is_main))
+            rows = {r for (r, _) in rep_pool}
+            cols = {c for (_, c) in rep_pool}
+            if len(cols) == 1 and len(rows) > 1:
+                rep = min(rep_pool, key=lambda rc: (rc[0], rc[1]))
+            elif len(rows) == 1 and len(cols) > 1:
+                rep = min(rep_pool, key=lambda rc: (rc[1], rc[0]))
+            else:
+                rep = min(rep_pool, key=lambda rc: (rc[0], rc[1]))
+
+            group_set = set(group_cells)
+            is_main = main_entry_cell is not None and main_entry_cell in group_set
+            groups.append(_OpeningGroup(group_cells, kind, rep, is_main))
 
     return groups
 
@@ -555,7 +551,6 @@ def _place_sirens(
 
     # Outdoor siren: façade wall next to main entry, left first then right.
     if rules.place_outdoor:
-        # Locate main entry structural door cell.
         main_entries = [
             e
             for e in scenario.elements
@@ -564,9 +559,12 @@ def _place_sirens(
         if main_entries:
             main = main_entries[0]
             door_cell = main.cells[0]
-            dr0, dc0 = door_cell
 
-            # Find one OUTDOOR neighbour to determine façade/outside direction.
+            # For thick openings, flood to find an exterior-edge cell in the group.
+            group, ext_edge, _seeds = flood_fill_opening_group(grid, door_cell)
+            anchor = ext_edge[0] if ext_edge else door_cell
+            dr0, dc0 = anchor
+
             outward: Optional[GridCoord] = None
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr, nc = dr0 + dr, dc0 + dc
@@ -926,90 +924,158 @@ def _place_pirs(
 
     used_coords: Set[GridCoord] = set()
 
-    # 1) Force PIRs anchored to every exterior door that has no magnetic,
-    #    if configured by PirRules. This guarantees each un-magnetized exterior
-    #    opening has a nearby motion device when required by the profile.
-    if pir_rules.protect_unmagnetized_doors:
-        exterior_doors: Set[GridCoord] = {
-            (r, c)
-            for r in range(grid.height)
-            for c in range(grid.width)
-            if CellType(cells[r][c]) is CellType.DOOR
-            and is_interior_opening_to_outdoor(grid, (r, c))
-        }
-        magnetic_cells: Set[GridCoord] = {
-            d.cell for d in devices if d.device_type is DeviceType.MAGNETIC
-        }
+    def _append_pir(coord: GridCoord, reasons: List[str]) -> None:
+        pir_index = len([d for d in devices if d.device_type is DeviceType.PIR]) + 1
+        devices.append(
+            DevicePlacement(
+                id=f"dev_pir_{pir_index}",
+                device_type=DeviceType.PIR,
+                cell=coord,
+                room_id=None,
+                orientation_deg=None,
+                coverage_radius_cells=radius_cells,
+                coverage_angle_deg=fov_deg,
+                reasons=reasons,
+                is_out_of_standard=False,
+            )
+        )
 
-        # Doors that are exterior and do NOT have a magnetic placed on them.
-        unprotected_doors = {d for d in exterior_doors if d not in magnetic_cells}
-
-        # Precompute initial red set for anchor scoring.
-        initial_red: Set[GridCoord] = {
-            coord
-            for z in zones
-            if z.zone_type is ZoneType.RED
-            for coord in z.cells
-        }
-
-        for door_coord in sorted(unprotected_doors):
-            # Anchor candidates: PIR candidates that are 4-neighbours of the door (just inside).
-            anchor_candidates: List[GridCoord] = []
-            drc = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            dr0, dc0 = door_coord
-            for dr, dc in drc:
-                nr, nc = dr0 + dr, dc0 + dc
-                cand = (nr, nc)
-                if cand in candidates and CellType(cells[nr][nc]) is CellType.INDOOR:
-                    # Candidate is valid only if coverage_cache exists and covers at least some red.
-                    cov = coverage_cache.get(cand, set())
-                    if cov & initial_red:
-                        anchor_candidates.append(cand)
-
-            if not anchor_candidates:
+    # Phase A/B: opening-anchored PIR placement.
+    # First try same-wall candidates (adjacent to the opening group), preferring
+    # corner/extreme anchors. If not enough, expand to local candidates near the opening.
+    opening_groups: List[Tuple[Set[GridCoord], List[GridCoord], str]] = []
+    og_visited: Set[GridCoord] = set()
+    for r in range(grid.height):
+        for c in range(grid.width):
+            coord = (r, c)
+            if coord in og_visited:
                 continue
+            if not is_interior_opening_to_outdoor(grid, coord):
+                continue
+            group, ext_edge, _seeds = flood_fill_opening_group(grid, coord)
+            og_visited.update(group)
+            if not group or not ext_edge:
+                continue
+            group_set = set(group)
+            interior_edge = [
+                gc
+                for gc in group
+                if any(
+                    CellType(cells[nr][nc]) is CellType.INDOOR
+                    for nr, nc in [(gc[0] - 1, gc[1]), (gc[0] + 1, gc[1]), (gc[0], gc[1] - 1), (gc[0], gc[1] + 1)]
+                    if 0 <= nr < grid.height and 0 <= nc < grid.width
+                )
+            ]
+            kind = "door" if any(CellType(cells[gr][gc]) is CellType.DOOR for gr, gc in group) else "window"
+            opening_groups.append((group_set, interior_edge, kind))
 
-            best_anchor: Optional[GridCoord] = None
-            best_score = 0
-            for cand in anchor_candidates:
-                cov = coverage_cache[cand]
-                score = len(cov & initial_red)
+    influence_cells = 2.0 / cell_size
+    local_max_dist = max(3.0, min(12.0, radius_cells / 4.0))
+
+    def _min_dist_to_group(coord: GridCoord, group_set: Set[GridCoord]) -> float:
+        cr, cc = coord
+        return min(max(abs(cr - gr), abs(cc - gc)) for gr, gc in group_set)
+
+    for group_set, interior_edge, kind in opening_groups:
+        if not remaining_red:
+            break
+        # Heuristic mapping: red cells closer to this opening than influence depth
+        # are considered this opening's responsibility.
+        group_red: Set[GridCoord] = {
+            rc for rc in remaining_red if _min_dist_to_group(rc, group_set) <= influence_cells
+        }
+        if not group_red:
+            continue
+
+        # Endpoints for tie-break: prefer anchors near opening extremes.
+        endpoints: List[GridCoord] = []
+        if interior_edge:
+            rows = [r for r, _ in interior_edge]
+            cols = [c for _, c in interior_edge]
+            if (max(rows) - min(rows)) >= (max(cols) - min(cols)):
+                endpoints = [min(interior_edge, key=lambda x: x[0]), max(interior_edge, key=lambda x: x[0])]
+            else:
+                endpoints = [min(interior_edge, key=lambda x: x[1]), max(interior_edge, key=lambda x: x[1])]
+
+        def _endpoint_dist(cand: GridCoord) -> float:
+            if not endpoints:
+                return 9999.0
+            cr, cc = cand
+            return min(abs(cr - er) + abs(cc - ec) for er, ec in endpoints)
+
+        # A1) Same-wall candidates: indoor + wall-adjacent + adjacent to opening group.
+        same_wall_candidates: List[GridCoord] = []
+        for cand in candidates:
+            if cand in used_coords:
+                continue
+            cr, cc = cand
+            if not any(
+                (nr, nc) in group_set
+                for nr, nc in [(cr - 1, cc), (cr + 1, cc), (cr, cc - 1), (cr, cc + 1)]
+                if 0 <= nr < grid.height and 0 <= nc < grid.width
+            ):
+                continue
+            same_wall_candidates.append(cand)
+
+        best_anchor: Optional[GridCoord] = None
+        best_anchor_score = 0
+        for cand in same_wall_candidates:
+            score = len(coverage_cache[cand] & group_red)
+            if score == 0:
+                continue
+            if (
+                best_anchor is None
+                or score > best_anchor_score
+                or (
+                    score == best_anchor_score
+                    and is_corner.get(cand, False)
+                    and not is_corner.get(best_anchor, False)
+                )
+                or (
+                    score == best_anchor_score
+                    and is_corner.get(cand, False) == is_corner.get(best_anchor, False)
+                    and _endpoint_dist(cand) < _endpoint_dist(best_anchor)
+                )
+            ):
+                best_anchor = cand
+                best_anchor_score = score
+
+        if best_anchor is not None and best_anchor_score > 0:
+            used_coords.add(best_anchor)
+            covered = coverage_cache[best_anchor] & remaining_red
+            remaining_red -= covered
+            group_red -= covered
+            reason = "protect_exterior_door" if kind == "door" else "protect_exterior_window"
+            _append_pir(best_anchor, ["pir", "cover_red_zone", "same_wall_opening", reason])
+
+        # A2) If still not fully covered, use local near-opening candidates.
+        while group_red:
+            best_local: Optional[GridCoord] = None
+            best_local_score = 0
+            for cand in candidates:
+                if cand in used_coords:
+                    continue
+                if _min_dist_to_group(cand, group_set) > local_max_dist:
+                    continue
+                score = len(coverage_cache[cand] & group_red)
                 if score == 0:
                     continue
-                cand_is_corner = is_corner.get(cand, False)
-                best_is_corner = is_corner.get(best_anchor, False) if best_anchor is not None else False
                 if (
-                    best_anchor is None
-                    or score > best_score
-                    or (score == best_score and cand_is_corner and not best_is_corner)
+                    best_local is None
+                    or score > best_local_score
+                    or (score == best_local_score and is_corner.get(cand, False) and not is_corner.get(best_local, False))
                 ):
-                    best_anchor = cand
-                    best_score = score
+                    best_local = cand
+                    best_local_score = score
+            if best_local is None or best_local_score == 0:
+                break
+            used_coords.add(best_local)
+            covered_local = coverage_cache[best_local] & remaining_red
+            remaining_red -= covered_local
+            group_red -= covered_local
+            _append_pir(best_local, ["pir", "cover_red_zone", "local_opening_fallback"])
 
-            if best_anchor is None or best_score == 0:
-                continue
-
-            used_coords.add(best_anchor)
-            newly_covered_anchor = coverage_cache[best_anchor] & remaining_red
-            remaining_red -= newly_covered_anchor
-
-            pir_index = len([d for d in devices if d.device_type is DeviceType.PIR]) + 1
-            devices.append(
-                DevicePlacement(
-                    id=f"dev_pir_{pir_index}",
-                    device_type=DeviceType.PIR,
-                    cell=best_anchor,
-                    room_id=None,
-                    orientation_deg=None,
-                    coverage_radius_cells=radius_cells,
-                    coverage_angle_deg=fov_deg,
-                    reasons=["pir", "cover_red_zone", "protect_exterior_door"],
-                    is_out_of_standard=False,
-                )
-            )
-
-    # 2) Greedy covering loop: always pick best remaining candidate.
-    # Greedy covering loop: always pick best remaining candidate.
+    # Phase C) Global greedy for any residual red not solved by opening-anchored strategy.
     while remaining_red:
         best_coord: Optional[GridCoord] = None
         best_score = 0
@@ -1051,20 +1117,7 @@ def _place_pirs(
         newly_covered: Set[GridCoord] = coverage_cache[best_coord] & remaining_red
         remaining_red -= newly_covered
 
-        pir_index = len([d for d in devices if d.device_type is DeviceType.PIR]) + 1
-        devices.append(
-            DevicePlacement(
-                id=f"dev_pir_{pir_index}",
-                device_type=DeviceType.PIR,
-                cell=best_coord,
-                room_id=None,
-                orientation_deg=None,
-                coverage_radius_cells=radius_cells,
-                coverage_angle_deg=fov_deg,
-                reasons=["pir", "cover_red_zone"],
-                is_out_of_standard=False,
-            )
-        )
+        _append_pir(best_coord, ["pir", "cover_red_zone", "global_fallback"])
 
         if not remaining_red:
             break

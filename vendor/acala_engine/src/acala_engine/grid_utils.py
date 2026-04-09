@@ -116,6 +116,61 @@ def flood_fill_indoor_component(grid: GridMap, start: GridCoord) -> List[GridCoo
     return sorted(visited)
 
 
+def flood_fill_opening_group(
+    grid: GridMap,
+    start: GridCoord,
+) -> Tuple[List[GridCoord], List[GridCoord], List[GridCoord]]:
+    """
+    From a DOOR/WINDOW cell, flood-fill through 4-connected DOOR/WINDOW cells.
+
+    Returns (group, exterior_edge, interior_seeds):
+      - group: all connected DOOR/WINDOW cells (sorted)
+      - exterior_edge: subset of group that is 4-adjacent to OUTDOOR
+      - interior_seeds: INDOOR cells 4-adjacent to any group member (deduplicated, sorted)
+
+    Handles multi-pixel-thick openings: the exterior edge may not touch INDOOR,
+    but the interior side of the group will.
+    """
+    if not is_inside(grid, start):
+        return [], [], []
+    start_type = CellType(get_cell(grid, start))
+    if start_type not in (CellType.DOOR, CellType.WINDOW):
+        return [], [], []
+
+    visited: Set[GridCoord] = set()
+    q: deque[GridCoord] = deque([start])
+    visited.add(start)
+
+    while q:
+        cur = q.popleft()
+        for n in iter_neighbors_4(grid, cur):
+            if n in visited:
+                continue
+            nt = CellType(get_cell(grid, n))
+            if nt in (CellType.DOOR, CellType.WINDOW):
+                visited.add(n)
+                q.append(n)
+
+    group = sorted(visited)
+    exterior_edge: List[GridCoord] = []
+    indoor_seed_set: Set[GridCoord] = set()
+    for cell in group:
+        for n in iter_neighbors_4(grid, cell):
+            nt = CellType(get_cell(grid, n))
+            if nt is CellType.OUTDOOR:
+                exterior_edge.append(cell)
+                break
+    for cell in group:
+        for n in iter_neighbors_4(grid, cell):
+            if n in visited:
+                continue
+            nt = CellType(get_cell(grid, n))
+            if nt is CellType.INDOOR:
+                indoor_seed_set.add(n)
+
+    return group, sorted(set(exterior_edge)), sorted(indoor_seed_set)
+
+
 def find_all_indoor_components(grid: GridMap) -> List[List[GridCoord]]:
     """
     Find all 4-connected components of INDOOR cells in the grid.

@@ -197,57 +197,35 @@ def _elements_from_heuristics(
 
 def _diagnose_red_zone_seeding(grid: Any) -> list[str]:
     """
-    acala_engine red zones start BFS only from INDOOR 4-neighbours of an exterior
-    opening. If the discretized plan has a door/window flush to outdoor with no
-    adjacent indoor cell (e.g. door row only touches outdoor + wall/other doors),
-    that opening produces no red zone and typically no PIRs.
-    """
-    from acala_engine.grid_utils import is_interior_opening_to_outdoor, iter_neighbors_4
-    from acala_engine.model import CellType
+    Check that every exterior opening group can seed a red zone.
 
-    bad_cells: list[tuple[int, int]] = []
+    With the flood_fill_opening_group fix, multi-thick openings should always
+    have interior seeds. This diagnostic now warns only for pathological cases
+    where an opening group is completely walled off from any INDOOR cell.
+    """
+    from acala_engine.grid_utils import (
+        flood_fill_opening_group,
+        is_interior_opening_to_outdoor,
+    )
+
+    visited: set[tuple[int, int]] = set()
+    warnings: list[str] = []
     for r in range(grid.height):
         for c in range(grid.width):
             coord = (r, c)
+            if coord in visited:
+                continue
             if not is_interior_opening_to_outdoor(grid, coord):
                 continue
-            has_indoor_nb = any(
-                CellType(grid.cells[n[0]][n[1]]) is CellType.INDOOR
-                for n in iter_neighbors_4(grid, coord)
-            )
-            if not has_indoor_nb:
-                bad_cells.append(coord)
-
-    if not bad_cells:
-        return []
-
-    # One warning per 4-connected cluster of problematic opening cells
-    h, w = grid.height, grid.width
-    in_bad = np.zeros((h, w), dtype=bool)
-    for r, c in bad_cells:
-        in_bad[r, c] = True
-    visited = np.zeros_like(in_bad, dtype=bool)
-    warnings: list[str] = []
-    for r, c in bad_cells:
-        if visited[r, c]:
-            continue
-        stack = [(r, c)]
-        visited[r, c] = True
-        rep = (r, c)
-        while stack:
-            y, x = stack.pop()
-            rep = min(rep, (y, x))
-            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                ny, nx = y + dy, x + dx
-                if 0 <= ny < h and 0 <= nx < w and in_bad[ny, nx] and not visited[ny, nx]:
-                    visited[ny, nx] = True
-                    stack.append((ny, nx))
-        ry, rcx = rep
-        warnings.append(
-            f"Exterior opening cluster (repr row={ry},col={rcx}) has no INDOOR 4-neighbour "
-            "(acala red-zone BFS never seeds → usually no PIRs for that perimeter). "
-            "Try a 1-cell indoor band inside the façade or adjust downsampling."
-        )
+            group, _ext, seeds = flood_fill_opening_group(grid, coord)
+            visited.update(group)
+            if not seeds:
+                rep = group[0] if group else coord
+                warnings.append(
+                    f"Exterior opening group (repr row={rep[0]},col={rep[1]}) "
+                    "has no INDOOR neighbour even after flooding through thick "
+                    "opening. Check grid topology."
+                )
     return warnings
 
 

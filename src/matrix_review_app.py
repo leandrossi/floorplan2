@@ -45,6 +45,7 @@ except ImportError:
     go = None  # type: ignore[assignment]
 
 DEFAULT_BUNDLE = _PROJECT_ROOT / "output" / "final" / "step04" / "review_bundle.json"
+DEFAULT_STEP05_DIR = _PROJECT_ROOT / "output" / "final" / "step05"
 
 # Match final_step04 struct preview colors (BGR-ish order for OpenCV; here RGB for plotly/UI)
 _STRUCT_RGB: dict[int, tuple[int, int, int]] = {
@@ -53,6 +54,15 @@ _STRUCT_RGB: dict[int, tuple[int, int, int]] = {
     2: (0, 180, 255),  # window
     3: (0, 100, 0),  # door
     4: (255, 220, 180),  # interior
+}
+
+_DEVICE_STYLE: dict[str, dict[str, object]] = {
+    "panel": {"code": 10, "rgb": (68, 114, 196), "label": "PB"},
+    "keyboard": {"code": 11, "rgb": (112, 173, 71), "label": "KB"},
+    "magnetic": {"code": 12, "rgb": (255, 192, 0), "label": "MG"},
+    "pir": {"code": 13, "rgb": (255, 87, 34), "label": "PIR"},
+    "siren_indoor": {"code": 14, "rgb": (156, 39, 176), "label": "SI"},
+    "siren_outdoor": {"code": 15, "rgb": (33, 150, 243), "label": "SO"},
 }
 
 
@@ -130,6 +140,162 @@ def _overlay_markers(
         if 0 <= r < out.shape[0] and 0 <= c < out.shape[1]:
             out[r, c] = (0, 0, 255)
     return out
+
+
+def _alpha_blend(base: np.ndarray, mask: np.ndarray, color: tuple[int, int, int], alpha: float) -> np.ndarray:
+    out = base.copy().astype(np.float32)
+    c = np.array(color, dtype=np.float32).reshape(1, 1, 3)
+    out[mask] = out[mask] * (1.0 - alpha) + c.reshape(3) * alpha
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _draw_square(img: np.ndarray, r: int, c: int, color: tuple[int, int, int], radius: int = 1) -> None:
+    h, w, _ = img.shape
+    r0, r1 = max(0, r - radius), min(h - 1, r + radius)
+    c0, c1 = max(0, c - radius), min(w - 1, c + radius)
+    img[r0 : r1 + 1, c0 : c1 + 1] = np.array(color, dtype=np.uint8)
+
+
+def _load_step05_outputs(step05_dir: Path) -> tuple[dict | None, dict | None]:
+    proposal_p = step05_dir / "installation_proposal.json"
+    report_p = step05_dir / "alarm_plan_report.json"
+    proposal = None
+    report = None
+    if proposal_p.is_file():
+        try:
+            proposal = json.loads(proposal_p.read_text(encoding="utf-8"))
+        except Exception:
+            proposal = None
+    if report_p.is_file():
+        try:
+            report = json.loads(report_p.read_text(encoding="utf-8"))
+        except Exception:
+            report = None
+    return proposal, report
+
+
+def _render_proposal_views(
+    eff: np.ndarray,
+    *,
+    proposal: dict | None,
+    show_red_zones: bool,
+    show_devices: bool,
+    replace_base_with_devices: bool,
+) -> tuple[np.ndarray, np.ndarray, dict[str, int], int]:
+    red_img = _rgb_from_struct(eff)
+    dev_img = _rgb_from_struct(eff)
+    device_counts: dict[str, int] = {}
+    red_cells_count = 0
+    if not proposal:
+        return red_img, dev_img, device_counts, red_cells_count
+
+    zones = proposal.get("zones") or []
+    devices = proposal.get("devices") or []
+    h, w = eff.shape
+
+    if show_red_zones:
+        red_mask = np.zeros((h, w), dtype=bool)
+        for z in zones:
+            zt = str(z.get("zone_type") or "").lower()
+            if zt != "red":
+                continue
+            for rc in z.get("cells") or []:
+                if not isinstance(rc, (list, tuple)) or len(rc) != 2:
+                    continue
+                r, c = int(rc[0]), int(rc[1])
+                if 0 <= r < h and 0 <= c < w:
+                    red_mask[r, c] = True
+        red_cells_count = int(red_mask.sum())
+        if red_cells_count > 0:
+            red_img = _alpha_blend(red_img, red_mask, (220, 20, 60), alpha=0.42)
+
+    if show_devices:
+        if replace_base_with_devices:
+            repl = eff.copy()
+            for d in devices:
+                dt = str(d.get("device_type") or "").lower()
+                style = _DEVICE_STYLE.get(dt)
+                cell = d.get("cell") or []
+                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
+                    continue
+                r, c = int(cell[0]), int(cell[1])
+                if 0 <= r < h and 0 <= c < w:
+                    repl[r, c] = int(style["code"])  # type: ignore[index]
+                    device_counts[dt] = device_counts.get(dt, 0) + 1
+            dev_img = _rgb_from_struct(repl)
+            for dt, style in _DEVICE_STYLE.items():
+                code = int(style["code"])  # type: ignore[index]
+                rgb = style["rgb"]  # type: ignore[assignment]
+                dev_img[repl == code] = np.array(rgb, dtype=np.uint8)
+        else:
+            for d in devices:
+                dt = str(d.get("device_type") or "").lower()
+                style = _DEVICE_STYLE.get(dt)
+                cell = d.get("cell") or []
+                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
+                    continue
+                r, c = int(cell[0]), int(cell[1])
+                if 0 <= r < h and 0 <= c < w:
+                    _draw_square(dev_img, r, c, style["rgb"])  # type: ignore[index]
+                    device_counts[dt] = device_counts.get(dt, 0) + 1
+
+    return red_img, dev_img, device_counts, red_cells_count
+
+
+def _compute_pre_suppression_red_mask(
+    eff: np.ndarray,
+    *,
+    main_entry: list[int] | None,
+    electric_board: list[int] | None,
+    cell_size_m: float,
+    security_level: str = "optimal",
+) -> np.ndarray | None:
+    """
+    Build RED zones directly from exterior openings (before magnetic/PIR suppression),
+    using current effective struct + markers.
+    """
+    try:
+        from acala_engine import build_scenario, make_element
+        from acala_engine.zones import build_red_zones_for_exterior_openings
+    except Exception:
+        return None
+
+    struct_to_acala = {0: -1, 1: 1, 2: 3, 3: 2, 4: 0}
+    cells = [[struct_to_acala[int(v)] for v in row] for row in eff]
+    elements: list = []
+    if main_entry is not None and len(main_entry) == 2:
+        elements.append(
+            make_element(
+                id="elem_main_entry",
+                element_type="main_entry",
+                position=(int(main_entry[0]), int(main_entry[1])),
+            )
+        )
+    if electric_board is not None and len(electric_board) == 2:
+        elements.append(
+            make_element(
+                id="elem_electric_board",
+                element_type="electric_board",
+                position=(int(electric_board[0]), int(electric_board[1])),
+            )
+        )
+    scenario = build_scenario(
+        cells=cells,
+        cell_size_m=float(cell_size_m),
+        security_level=str(security_level),
+        fixture_name="proposal_preview",
+        rooms=[],
+        elements=elements,
+    )
+    zones = build_red_zones_for_exterior_openings(scenario)
+    h, w = eff.shape
+    mask = np.zeros((h, w), dtype=bool)
+    for z in zones:
+        for rc in z.cells:
+            r, c = int(rc[0]), int(rc[1])
+            if 0 <= r < h and 0 <= c < w:
+                mask[r, c] = True
+    return mask
 
 
 def _discrete_struct_colorscale() -> list[list]:
@@ -293,6 +459,8 @@ def main() -> None:
         st.subheader("Load bundle")
         default_path = st.text_input("review_bundle.json path", value=str(DEFAULT_BUNDLE))
         load_btn = st.button("Load / reload bundle")
+        st.subheader("Proposal preview")
+        step05_dir_input = st.text_input("step05 dir", value=str(DEFAULT_STEP05_DIR))
 
     bundle_path = Path(default_path).expanduser()
     if load_btn or "struct_base" not in st.session_state:
@@ -385,8 +553,8 @@ def main() -> None:
     }
     st.info(_mode_hints.get(mode, ""))
 
-    tab_click, tab_full, tab_legend = st.tabs(
-        ("Floor preview (click)", "Full struct (pan/zoom)", "Legend / status")
+    tab_click, tab_full, tab_proposal, tab_legend = st.tabs(
+        ("Floor preview (click)", "Full struct (pan/zoom)", "Proposal preview", "Legend / status")
     )
 
     with tab_click:
@@ -394,58 +562,39 @@ def main() -> None:
             "**Tip:** Clicks register **only** on this tab’s image. "
             "If the map is too tall, reduce “Preview display width” (scales the whole image)."
         )
-        if preview_path.is_file():
-            if streamlit_image_coordinates is not None:
-                coord = streamlit_image_coordinates(
-                    str(preview_path),
-                    key="preview_coords",
-                    width=int(preview_width),
-                )
-                if coord is not None and mode != "View":
-                    nat = _native_png_size(preview_path) or (w, h)
-                    pw, ph = nat
-                    picked = _grid_cell_from_display_click(
-                        coord,
-                        native_img_w=pw,
-                        native_img_h=ph,
-                        grid_w=w,
-                        grid_h=h,
-                    )
-                    if picked is not None:
-                        cx, cy = picked
-                        _apply_click(cx, cy, mode, paint_val, w, h, eff)
-            else:
-                st.image(str(preview_path), width=int(preview_width))
-                st.warning(
-                    "Install `streamlit-image-coordinates` for click-to-place: pip install streamlit-image-coordinates"
-                )
-        else:
-            st.info(f"No preview at {preview_path}; using struct RGB below.")
-            rgb = _overlay_markers(
-                _rgb_from_struct(eff),
-                main_entry=st.session_state.get("main_entry"),
-                electric_board=st.session_state.get("electric_board"),
+        # Always use a live RGB preview here so edits (markers/paint) are visible immediately.
+        rgb = _overlay_markers(
+            _rgb_from_struct(eff),
+            main_entry=st.session_state.get("main_entry"),
+            electric_board=st.session_state.get("electric_board"),
+        )
+        if streamlit_image_coordinates is not None:
+            coord = streamlit_image_coordinates(
+                rgb,
+                key="preview_coords_live",
+                width=int(preview_width),
             )
-            if streamlit_image_coordinates is not None:
-                coord = streamlit_image_coordinates(
-                    rgb,
-                    key="preview_coords_rgb",
-                    width=int(preview_width),
+            if coord is not None and mode != "View":
+                gh, gw = rgb.shape[0], rgb.shape[1]
+                picked = _grid_cell_from_display_click(
+                    coord,
+                    native_img_w=gw,
+                    native_img_h=gh,
+                    grid_w=w,
+                    grid_h=h,
                 )
-                if coord is not None and mode != "View":
-                    gh, gw = rgb.shape[0], rgb.shape[1]
-                    picked = _grid_cell_from_display_click(
-                        coord,
-                        native_img_w=gw,
-                        native_img_h=gh,
-                        grid_w=w,
-                        grid_h=h,
-                    )
-                    if picked is not None:
-                        cx, cy = picked
-                        _apply_click(cx, cy, mode, paint_val, w, h, eff)
-            else:
-                st.image(rgb, width=int(preview_width))
+                if picked is not None:
+                    cx, cy = picked
+                    _apply_click(cx, cy, mode, paint_val, w, h, eff)
+        else:
+            st.image(rgb, width=int(preview_width))
+            st.warning(
+                "Install `streamlit-image-coordinates` for click-to-place: pip install streamlit-image-coordinates"
+            )
+
+        if preview_path.is_file():
+            with st.expander("Original floor_like preview (reference)", expanded=False):
+                st.image(str(preview_path), width=int(preview_width))
 
     with tab_full:
         st.markdown(
@@ -529,6 +678,91 @@ def main() -> None:
             "Markers: main entry • red pixel; electric board • blue pixel. "
             "Widen/tall layout: sidebar *Full struct map width* + Plotly figure height scales with row count."
         )
+
+    with tab_proposal:
+        st.markdown("### Step05 proposal preview")
+        step05_dir = Path(step05_dir_input).expanduser()
+        proposal, report = _load_step05_outputs(step05_dir)
+        copt1, copt2, copt3 = st.columns(3)
+        with copt1:
+            show_red_zones = st.checkbox("Show red zones", value=True)
+        with copt2:
+            show_devices = st.checkbox("Show devices", value=True)
+        with copt3:
+            replace_base_with_devices = st.checkbox("Replace base cell with device", value=True)
+
+        if proposal is None:
+            st.warning(
+                f"Could not load `installation_proposal.json` from `{step05_dir}`. "
+                "Run step05 first, then reload this tab."
+            )
+        red_img, dev_img, device_counts, red_cells_count = _render_proposal_views(
+            eff,
+            proposal=proposal,
+            show_red_zones=show_red_zones,
+            show_devices=show_devices,
+            replace_base_with_devices=replace_base_with_devices,
+        )
+        if show_red_zones:
+            cell_size_from_report = 0.05
+            sec_level_from_report = "optimal"
+            if report is not None:
+                try:
+                    cell_size_from_report = float(report.get("cell_size_m") or cell_size_from_report)
+                except Exception:
+                    pass
+                sec_level_from_report = str(report.get("security_level") or sec_level_from_report)
+            pre_mask = _compute_pre_suppression_red_mask(
+                eff,
+                main_entry=st.session_state.get("main_entry"),
+                electric_board=st.session_state.get("electric_board"),
+                cell_size_m=cell_size_from_report,
+                security_level=sec_level_from_report,
+            )
+            if pre_mask is not None:
+                pre_cnt = int(pre_mask.sum())
+                if pre_cnt > 0:
+                    red_img = _alpha_blend(_rgb_from_struct(eff), pre_mask, (220, 20, 60), alpha=0.42)
+                    red_cells_count = pre_cnt
+        v1, v2 = st.columns(2)
+        with v1:
+            st.markdown("**Floorplan + red zones (before suppression by devices)**")
+            st.image(red_img, width=int(preview_width))
+            if show_red_zones and red_cells_count == 0:
+                st.info("No pre-suppression red zones detected.")
+        with v2:
+            st.markdown("**Floorplan + devices**")
+            st.image(dev_img, width=int(preview_width))
+
+        if show_devices and not device_counts:
+            st.warning(
+                "Device list is empty. We can still proceed manually, but usually this means "
+                "planning constraints removed all placements or proposal data is missing."
+            )
+            if report:
+                st.caption(
+                    f"Report hints — warnings: {len(report.get('warnings') or [])}, "
+                    f"errors: {len(report.get('errors') or [])}, "
+                    f"security_level: {report.get('security_level')}"
+                )
+
+        st.markdown("**Device legend / counts**")
+        if device_counts:
+            st.json(device_counts)
+        else:
+            st.caption("No devices rendered.")
+
+        if report:
+            with st.expander("Step05 report summary"):
+                st.json(
+                    {
+                        "ok": report.get("ok"),
+                        "warnings": report.get("warnings"),
+                        "errors": report.get("errors"),
+                        "device_counts": report.get("device_counts"),
+                        "zone_summaries": report.get("zone_summaries"),
+                    }
+                )
 
     with tab_legend:
         st.subheader("Legend / struct")

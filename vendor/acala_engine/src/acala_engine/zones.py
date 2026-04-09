@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from typing import List, Set
 
-from .grid_utils import is_interior_opening_to_outdoor, radius_expand, iter_neighbors_4
+from .grid_utils import (
+    flood_fill_opening_group,
+    is_interior_opening_to_outdoor,
+    iter_neighbors_4,
+    radius_expand,
+)
 from .model import (
     CellType,
     GridCoord,
@@ -35,42 +40,45 @@ def build_red_zones_for_exterior_openings(
     """
     Generate red zones for exterior-accessible windows and doors.
 
-    - For every DOOR / WINDOW cell that touches outdoor on the other side,
-      we create a small red zone inside the dwelling.
-    - The red zone covers indoor cells within `influence_depth_m` of the opening,
-      but expansion is *wall-aware*: it only flows through indoor cells and
-      cannot "leak" through walls into other rooms.
+    For every connected group of DOOR/WINDOW cells that reaches OUTDOOR on one
+    side, seed a BFS from the INDOOR cells adjacent to the *interior* edge of
+    that group.  This handles openings that are 1-cell, 2-cell, or N-cell thick
+    (common in rasterized floorplans where a wall+window occupies several rows).
+
+    Expansion is wall-aware: only INDOOR cells within ``influence_depth_m``
+    (Chebyshev from the nearest group cell) are included.
     """
     grid = scenario.grid_map
     radius_cells = influence_depth_m / grid.cell_size_m
 
     zones: List[Zone] = []
     red_index = 1
+    processed_openings: Set[GridCoord] = set()
 
-    # Iterate over all cells; doors/windows live in the matrix, not elements.
     for r in range(grid.height):
         for c in range(grid.width):
             coord = (r, c)
+            if coord in processed_openings:
+                continue
             if not _is_exterior_opening_cell(scenario, coord):
                 continue
 
-            red_cells: Set[GridCoord] = set()
+            group, _ext_edge, interior_seeds = flood_fill_opening_group(grid, coord)
+            processed_openings.update(group)
 
-            # Start from indoor neighbours just inside the opening.
-            r0, c0 = coord
-            start_cells: List[GridCoord] = []
-            for n in iter_neighbors_4(grid, coord):
-                nr, nc = n
-                if CellType(grid.cells[nr][nc]) is CellType.INDOOR:
-                    # Chebyshev distance limit, same as radius_expand.
-                    if max(abs(nr - r0), abs(nc - c0)) <= radius_cells:
-                        start_cells.append(n)
-
-            if not start_cells:
+            if not interior_seeds:
                 continue
 
+            group_set = set(group)
+
+            def _min_chebyshev_to_group(cr: int, cc: int) -> float:
+                return min(
+                    max(abs(cr - gr), abs(cc - gc)) for gr, gc in group_set
+                )
+
+            red_cells: Set[GridCoord] = set()
             visited: Set[GridCoord] = set()
-            queue: List[GridCoord] = list(start_cells)
+            queue = list(interior_seeds)
 
             while queue:
                 cur = queue.pop(0)
@@ -79,10 +87,8 @@ def build_red_zones_for_exterior_openings(
                 visited.add(cur)
 
                 cr, cc = cur
-                # Respect radius limit from the opening.
-                if max(abs(cr - r0), abs(cc - c0)) > radius_cells:
+                if _min_chebyshev_to_group(cr, cc) > radius_cells:
                     continue
-
                 if CellType(grid.cells[cr][cc]) is not CellType.INDOOR:
                     continue
 
