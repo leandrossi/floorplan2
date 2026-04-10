@@ -22,6 +22,7 @@ from typing import Any
 
 import numpy as np
 import streamlit as st
+from PIL import Image, UnidentifiedImageError
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
@@ -68,6 +69,12 @@ SECURITY_LEVELS = {
     "Maximo": "max",
 }
 
+# Upload / processing guards for heterogeneous plans.
+MAX_UPLOAD_MB = 15
+MAX_IMAGE_WIDTH = 6000
+MAX_IMAGE_HEIGHT = 6000
+MAX_GRID_CELLS = 250_000
+
 
 # ---------------------------------------------------------------------------
 # Session helpers
@@ -98,6 +105,17 @@ def _init_state() -> None:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+
+def _reset_plan_state_for_new_upload() -> None:
+    """Clear plan-specific state before loading a new floorplan."""
+    st.session_state.patch_map = {}
+    st.session_state.main_entry = None
+    st.session_state.electric_board = None
+    st.session_state._img_click_sig = None
+    st.session_state.step05_dir = None
+    st.session_state.proposal = None
+    st.session_state.report = None
 
 
 # ---------------------------------------------------------------------------
@@ -211,22 +229,20 @@ def _load_bundle_into_session(step04_dir: Path) -> None:
         write_review_bundle(step04_dir, DEFAULT_CONFIG)
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     struct = np.array(bundle["struct"], dtype=np.uint8)
+    h, w = struct.shape
+    if h * w > MAX_GRID_CELLS:
+        raise RuntimeError(
+            f"Plano demasiado grande ({h}x{w} = {h*w} celdas). "
+            f"Máximo permitido: {MAX_GRID_CELLS} celdas."
+        )
     st.session_state.struct_base = struct
     st.session_state.step04_dir = str(step04_dir)
     st.session_state.cell_size_m = float(bundle.get("cell_size_m", 0.05))
+    # New upload should start from clean user markers/patches.
     st.session_state.patch_map = {}
+    st.session_state.main_entry = None
+    st.session_state.electric_board = None
     st.session_state._img_click_sig = None
-
-    approved_path = step04_dir / "review_approved.json"
-    existing = load_approved(approved_path)
-    if existing:
-        st.session_state.main_entry = existing.get("main_entry")
-        st.session_state.electric_board = existing.get("electric_board")
-        for p in existing.get("struct_patch") or []:
-            st.session_state.patch_map[(int(p["r"]), int(p["c"]))] = int(p["v"])
-    else:
-        st.session_state.main_entry = None
-        st.session_state.electric_board = None
 
 
 def render_step1() -> None:
@@ -255,6 +271,7 @@ def render_step1() -> None:
             st.warning(f"No se encontró `{json_path}`. Subí una imagen o generá el JSON primero.")
             return
         if st.button("Procesar con JSON existente", type="primary"):
+            _reset_plan_state_for_new_upload()
             bar = st.progress(0, text="Iniciando pipeline...")
             def _progress(pct: float, text: str) -> None:
                 bar.progress(pct, text=text)
@@ -271,12 +288,40 @@ def render_step1() -> None:
         st.info("Arrastrá o seleccioná una imagen para comenzar.")
         return
 
+    raw = uploaded.getvalue()
+    size_mb = len(raw) / (1024 * 1024)
+    if size_mb > MAX_UPLOAD_MB:
+        st.error(
+            f"Archivo demasiado grande ({size_mb:.1f} MB). "
+            f"Máximo permitido: {MAX_UPLOAD_MB} MB."
+        )
+        return
+
+    try:
+        with Image.open(uploaded) as im:
+            img_w, img_h = im.size
+    except UnidentifiedImageError:
+        st.error("No se pudo leer la imagen. Usá PNG/JPG/WebP válidos.")
+        return
+    except Exception as e:
+        st.error(f"Error leyendo imagen: {e}")
+        return
+
+    if img_w > MAX_IMAGE_WIDTH or img_h > MAX_IMAGE_HEIGHT:
+        st.error(
+            f"Resolución demasiado grande ({img_w}x{img_h}). "
+            f"Máximo permitido: {MAX_IMAGE_WIDTH}x{MAX_IMAGE_HEIGHT} px."
+        )
+        return
+
     st.image(uploaded, caption="Plano cargado", width=480)
+    st.caption(f"Archivo: {size_mb:.2f} MB - Resolución: {img_w}x{img_h} px")
 
     if st.button("Procesar plano", type="primary"):
+        _reset_plan_state_for_new_upload()
         tmp_dir = Path(tempfile.mkdtemp(prefix="fp_wiz_"))
         tmp_img = tmp_dir / uploaded.name
-        tmp_img.write_bytes(uploaded.getvalue())
+        tmp_img.write_bytes(raw)
 
         bar = st.progress(0, text="Conectando con Roboflow...")
         try:

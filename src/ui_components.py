@@ -126,8 +126,10 @@ def grid_cell_from_display_click(
 
 def effective_struct(base_np: np.ndarray, patch_map: dict[tuple[int, int], int]) -> np.ndarray:
     out = base_np.copy()
+    h, w = out.shape
     for (r, c), v in patch_map.items():
-        out[r, c] = v
+        if 0 <= r < h and 0 <= c < w:
+            out[r, c] = v
     return out
 
 
