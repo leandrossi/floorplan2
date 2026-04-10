@@ -8,7 +8,7 @@ Current behavior:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 import math
 
 from .model import (
@@ -470,7 +470,7 @@ def _suppress_red_zones_covered_by_pirs(
     cells = grid.cells
     cell_size = grid.cell_size_m
     pir_rules: PirRules = ALARM_RULES[security_level]["pir"]  # type: ignore[assignment]
-    radius_cells = capped_radius_cells(grid, pir_rules.radius_m, max_grid_fraction=0.40)
+    radius_cells = capped_radius_cells(grid, pir_rules.radius_m, max_grid_fraction=1.0)
 
     # Build indoor connectivity components once for the grid.
     component_ids_by_coord: Dict[GridCoord, int] = {}
@@ -722,6 +722,46 @@ def _pir_coverage_component_radius(
     return covered
 
 
+def _window_beyond_wall_from_indoor(
+    cells,
+    grid,
+    indoor_r: int,
+    indoor_c: int,
+    wall_r: int,
+    wall_c: int,
+) -> bool:
+    """
+    True if the cell one step past the wall (away from the indoor cell) is WINDOW.
+
+    Detects the thin wall between interior and the window strip in rasterised plans:
+    a corner with this wall counts as a "window jamb" corner, not two real room walls.
+    """
+    dr = wall_r - indoor_r
+    dc = wall_c - indoor_c
+    if abs(dr) + abs(dc) != 1:
+        return False
+    br, bc = wall_r + dr, wall_c + dc
+    if not (0 <= br < grid.height and 0 <= bc < grid.width):
+        return False
+    return CellType(cells[br][bc]) is CellType.WINDOW
+
+
+def _is_real_room_wall_corner_pir(
+    cells,
+    grid,
+    coord: GridCoord,
+    wall_neighbours: List[GridCoord],
+) -> bool:
+    """Indoor cell with 2+ wall neighbours and none of them is a window-jamb wall."""
+    if len(wall_neighbours) < 2:
+        return False
+    r, c = coord
+    for wr, wc in wall_neighbours:
+        if _window_beyond_wall_from_indoor(cells, grid, r, c, wr, wc):
+            return False
+    return True
+
+
 def _pir_coverage_quadrant(
     grid,
     cells,
@@ -814,6 +854,68 @@ def _is_red_corner_candidate(coord: GridCoord, red: Set[GridCoord], tol: int = 1
     return False
 
 
+def _prefer_window_tie_by_target_axis(
+    grid_height: int,
+    grid_width: int,
+    group_set: Set[GridCoord],
+    interior_edge: List[GridCoord],
+    mean_indoor_r: float,
+    mean_indoor_c: float,
+    cand: GridCoord,
+    incumbent: GridCoord,
+    opening_cheb_dist: Callable[[GridCoord], float],
+) -> bool:
+    """
+    When two window-anchored candidates tie on red coverage, prefer the row/col closest
+    to the first interior line past the opening (e.g. r = opening_rmax + 1 under a top
+    lintel), not the farthest row inside the local radius (which also ties coverage).
+    """
+    if not interior_edge or not group_set:
+        return False
+    rs = [r for r, _ in group_set]
+    cs = [c for _, c in group_set]
+    rmin, rmax = min(rs), max(rs)
+    cmin, cmax = min(cs), max(cs)
+    hspan = cmax - cmin
+    vspan = rmax - rmin
+    er = sum(r for r, _ in interior_edge) / len(interior_edge)
+    ec = sum(c for _, c in interior_edge) / len(interior_edge)
+    cr, cc = cand
+    ir, ic = incumbent
+
+    if hspan >= vspan:
+        if er < mean_indoor_r:
+            target_r = min(rmax + 1, grid_height - 1)
+        elif er > mean_indoor_r:
+            target_r = max(rmin - 1, 0)
+        else:
+            return False
+        dc = abs(cr - target_r)
+        di = abs(ir - target_r)
+        if dc < di:
+            return True
+        if dc > di:
+            return False
+        # Same distance to lintel row: prefer farther from the opening along the wall
+        # (room corner) instead of the jamb-adjacent cell with identical coverage.
+        return opening_cheb_dist(cand) > opening_cheb_dist(incumbent)
+    if vspan > hspan:
+        if ec < mean_indoor_c:
+            target_c = min(cmax + 1, grid_width - 1)
+        elif ec > mean_indoor_c:
+            target_c = max(cmin - 1, 0)
+        else:
+            return False
+        dc = abs(cc - target_c)
+        di = abs(ic - target_c)
+        if dc < di:
+            return True
+        if dc > di:
+            return False
+        return opening_cheb_dist(cand) > opening_cheb_dist(incumbent)
+    return False
+
+
 def _place_pirs(
     scenario: Scenario,
     zones: List[Zone],
@@ -855,7 +957,7 @@ def _place_pirs(
 
     # Motion geometry config (shared for PIR/PIRCAM).
     fov_deg = pir_rules.fov_deg
-    radius_cells = capped_radius_cells(grid, pir_rules.radius_m, max_grid_fraction=0.40)
+    radius_cells = capped_radius_cells(grid, pir_rules.radius_m, max_grid_fraction=1.0)
     half_fov_rad = math.radians(fov_deg / 2.0)
 
     # Build wall-adjacent indoor candidates, track their wall neighbours and corners (2+).
@@ -881,6 +983,19 @@ def _place_pirs(
 
     if not candidates:
         return
+
+    _indoor_cells = [
+        (r, c)
+        for r in range(grid.height)
+        for c in range(grid.width)
+        if CellType(cells[r][c]) is CellType.INDOOR
+    ]
+    if _indoor_cells:
+        mean_indoor_r = sum(r for r, _ in _indoor_cells) / len(_indoor_cells)
+        mean_indoor_c = sum(c for _, c in _indoor_cells) / len(_indoor_cells)
+    else:
+        mean_indoor_r = grid.height * 0.5
+        mean_indoor_c = grid.width * 0.5
 
     # Orientations: into-room normal per adjacent wall. Corners get multiple (wider effective FOV).
     def orientations_for_cell(coord: GridCoord) -> List[Tuple[float, float]]:
@@ -978,15 +1093,12 @@ def _place_pirs(
     for group_set, interior_edge, kind in opening_groups:
         if not remaining_red:
             break
-        # Heuristic mapping: red cells closer to this opening than influence depth
-        # are considered this opening's responsibility.
         group_red: Set[GridCoord] = {
             rc for rc in remaining_red if _min_dist_to_group(rc, group_set) <= influence_cells
         }
         if not group_red:
             continue
 
-        # Endpoints for tie-break: prefer anchors near opening extremes.
         endpoints: List[GridCoord] = []
         if interior_edge:
             rows = [r for r, _ in interior_edge]
@@ -1002,77 +1114,126 @@ def _place_pirs(
             cr, cc = cand
             return min(abs(cr - er) + abs(cc - ec) for er, ec in endpoints)
 
-        # A1) Same-wall candidates: indoor + wall-adjacent + adjacent to opening group.
-        same_wall_candidates: List[GridCoord] = []
-        for cand in candidates:
-            if cand in used_coords:
-                continue
-            cr, cc = cand
-            if not any(
-                (nr, nc) in group_set
-                for nr, nc in [(cr - 1, cc), (cr + 1, cc), (cr, cc - 1), (cr, cc + 1)]
-                if 0 <= nr < grid.height and 0 <= nc < grid.width
-            ):
-                continue
-            same_wall_candidates.append(cand)
+        # Only protect indoor components directly adjacent to this opening.
+        adjacent_comps: Set[int] = set()
+        for gr, gc in group_set:
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = gr + dr, gc + dc
+                if 0 <= nr < grid.height and 0 <= nc < grid.width:
+                    if CellType(cells[nr][nc]) is CellType.INDOOR:
+                        ac = component_ids_by_coord.get((nr, nc))
+                        if ac is not None:
+                            adjacent_comps.add(ac)
 
-        best_anchor: Optional[GridCoord] = None
-        best_anchor_score = 0
-        for cand in same_wall_candidates:
-            score = len(coverage_cache[cand] & group_red)
-            if score == 0:
+        comp_red: Dict[int, Set[GridCoord]] = {}
+        for rc in group_red:
+            cid = component_ids_by_coord.get(rc)
+            if cid is not None and cid in adjacent_comps:
+                comp_red.setdefault(cid, set()).add(rc)
+
+        reason_tag = "protect_exterior_door" if kind == "door" else "protect_exterior_window"
+
+        for cid, cr_set in comp_red.items():
+            cr_set = cr_set & remaining_red
+            if not cr_set:
                 continue
-            if (
-                best_anchor is None
-                or score > best_anchor_score
-                or (
-                    score == best_anchor_score
-                    and is_corner.get(cand, False)
-                    and not is_corner.get(best_anchor, False)
-                )
-                or (
-                    score == best_anchor_score
-                    and is_corner.get(cand, False) == is_corner.get(best_anchor, False)
-                    and _endpoint_dist(cand) < _endpoint_dist(best_anchor)
-                )
-            ):
-                best_anchor = cand
-                best_anchor_score = score
 
-        if best_anchor is not None and best_anchor_score > 0:
-            used_coords.add(best_anchor)
-            covered = coverage_cache[best_anchor] & remaining_red
-            remaining_red -= covered
-            group_red -= covered
-            reason = "protect_exterior_door" if kind == "door" else "protect_exterior_window"
-            _append_pir(best_anchor, ["pir", "cover_red_zone", "same_wall_opening", reason])
+            comp_cands = [
+                c for c in candidates
+                if c not in used_coords
+                and component_ids_by_coord.get(c) == cid
+            ]
+            if not comp_cands:
+                continue
 
-        # A2) If still not fully covered, use local near-opening candidates.
-        while group_red:
-            best_local: Optional[GridCoord] = None
-            best_local_score = 0
-            for cand in candidates:
-                if cand in used_coords:
-                    continue
-                if _min_dist_to_group(cand, group_set) > local_max_dist:
-                    continue
-                score = len(coverage_cache[cand] & group_red)
-                if score == 0:
-                    continue
-                if (
-                    best_local is None
-                    or score > best_local_score
-                    or (score == best_local_score and is_corner.get(cand, False) and not is_corner.get(best_local, False))
-                ):
-                    best_local = cand
-                    best_local_score = score
-            if best_local is None or best_local_score == 0:
-                break
-            used_coords.add(best_local)
-            covered_local = coverage_cache[best_local] & remaining_red
-            remaining_red -= covered_local
-            group_red -= covered_local
-            _append_pir(best_local, ["pir", "cover_red_zone", "local_opening_fallback"])
+            best_any = max(comp_cands, key=lambda c: len(coverage_cache[c] & cr_set))
+            best_any_score = len(coverage_cache[best_any] & cr_set)
+            if best_any_score == 0:
+                continue
+
+            chosen: Optional[GridCoord] = None
+
+            # Priority 1: corner — prefer two real room walls (no window-jamb wall); else any corner.
+            corner_cands = [c for c in comp_cands if is_corner.get(c, False)]
+            if corner_cands:
+                real_corner_cands = [
+                    c
+                    for c in corner_cands
+                    if _is_real_room_wall_corner_pir(cells, grid, c, wall_neighbours_by_coord.get(c, []))
+                ]
+
+                def _corner_key_near_opening(c: GridCoord) -> Tuple[int, float]:
+                    return (len(coverage_cache[c] & cr_set), -_endpoint_dist(c))
+
+                def _corner_key_real_wall_preferred(c: GridCoord) -> Tuple[int, float, float]:
+                    """
+                    Among equal coverage: stay in the same wall band as the opening (min perpendicular
+                    offset), then move along that wall away from the glazing (max Chebyshev distance
+                    to the opening group). Avoids picking a far corner on another wall (e.g. row 42)
+                    or a jamb-adjacent real corner on the window end.
+                    """
+                    cov = len(coverage_cache[c] & cr_set)
+                    cr, cc = c
+                    if not interior_edge:
+                        return (cov, 0.0, _min_dist_to_group(c, group_set))
+                    rows_ie = [r for r, _ in interior_edge]
+                    cols_ie = [c for _, c in interior_edge]
+                    row_span = max(rows_ie) - min(rows_ie)
+                    col_span = max(cols_ie) - min(cols_ie)
+                    # Horizontal glazing (wider along cols): depth into room is along rows.
+                    # Vertical glazing: depth is along cols.
+                    if col_span > row_span:
+                        med_r = sum(rows_ie) / len(rows_ie)
+                        perp_off = abs(float(cr) - med_r)
+                    else:
+                        med_c = sum(cols_ie) / len(cols_ie)
+                        perp_off = abs(float(cc) - med_c)
+                    return (cov, -perp_off, _min_dist_to_group(c, group_set))
+
+                if real_corner_cands:
+                    best_corner = max(real_corner_cands, key=_corner_key_real_wall_preferred)
+                    corner_score = len(coverage_cache[best_corner] & cr_set)
+                    if corner_score >= 0.60 * best_any_score:
+                        chosen = best_corner
+                    else:
+                        # Real corners exist but none reach 60 % — fall back to window-jamb corners.
+                        best_any_corner = max(corner_cands, key=_corner_key_near_opening)
+                        ac_score = len(coverage_cache[best_any_corner] & cr_set)
+                        if ac_score >= 0.60 * best_any_score:
+                            chosen = best_any_corner
+                else:
+                    best_corner = max(corner_cands, key=_corner_key_near_opening)
+                    corner_score = len(coverage_cache[best_corner] & cr_set)
+                    if corner_score >= 0.60 * best_any_score:
+                        chosen = best_corner
+
+            # Priority 2: on-wall of opening (adjacent to opening group).
+            if chosen is None:
+                on_wall = [
+                    c for c in comp_cands
+                    if any(
+                        (nr, nc) in group_set
+                        for nr, nc in [(c[0]-1, c[1]), (c[0]+1, c[1]),
+                                       (c[0], c[1]-1), (c[0], c[1]+1)]
+                        if 0 <= nr < grid.height and 0 <= nc < grid.width
+                    )
+                ]
+                if on_wall:
+                    best_wall = max(on_wall, key=lambda c: (
+                        len(coverage_cache[c] & cr_set), -_endpoint_dist(c)
+                    ))
+                    wall_score = len(coverage_cache[best_wall] & cr_set)
+                    if wall_score >= 0.60 * best_any_score:
+                        chosen = best_wall
+
+            # Priority 3: max coverage anywhere in component.
+            if chosen is None:
+                chosen = best_any
+
+            used_coords.add(chosen)
+            covered_now = coverage_cache[chosen] & cr_set
+            remaining_red -= covered_now
+            _append_pir(chosen, ["pir", "cover_red_zone", "local_opening_fallback", reason_tag])
 
     # Phase C) Global greedy for any residual red not solved by opening-anchored strategy.
     while remaining_red:

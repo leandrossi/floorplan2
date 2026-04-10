@@ -118,6 +118,38 @@ def _enforce_opening_adjacency(
     return logs
 
 
+def _seal_exterior_interior_boundary(
+    struct_out: np.ndarray,
+) -> tuple[np.ndarray, list[str]]:
+    """
+    Convert exterior cells (0) directly 4-adjacent to interior cells (4) into
+    wall (1).  Returns (boolean mask of converted cells, log lines).
+
+    These are boundary holes where the model failed to detect a wall segment
+    between the building interior and the outside.
+    """
+    h, w = struct_out.shape
+    is_interior = struct_out == 4
+    is_exterior = struct_out == 0
+
+    adj_interior = np.zeros((h, w), dtype=bool)
+    adj_interior[1:, :] |= is_interior[:-1, :]
+    adj_interior[:-1, :] |= is_interior[1:, :]
+    adj_interior[:, 1:] |= is_interior[:, :-1]
+    adj_interior[:, :-1] |= is_interior[:, 1:]
+
+    sealed = is_exterior & adj_interior
+    struct_out[sealed] = 1
+
+    logs: list[str] = []
+    if int(sealed.sum()) > 0:
+        ys, xs = np.where(sealed)
+        logs.append(f"sealed {int(sealed.sum())} exterior→wall cells at interior boundary")
+        for y, x in zip(ys.tolist(), xs.tolist()):
+            logs.append(f"  ({y},{x})")
+    return sealed, logs
+
+
 def _label_inferred_interior_components(
     struct_out: np.ndarray, room_out: np.ndarray
 ) -> tuple[np.ndarray, list[str]]:
@@ -246,6 +278,7 @@ def run(space_npy: Path, room_npy: Path, config_path: Path, out_dir: Path) -> No
             free_pref[gi, gj] = _free_cell_vote(sb)
 
     opening_fix_report = _enforce_opening_adjacency(struct_out, free_pref)
+    sealed_mask, seal_report = _seal_exterior_interior_boundary(struct_out)
 
     inferred_mask, infer_report = _label_inferred_interior_components(struct_out, room_out)
 
@@ -260,6 +293,7 @@ def run(space_npy: Path, room_npy: Path, config_path: Path, out_dir: Path) -> No
     save_matrix_png(struct_out, out_dir / "final_structure_preview.png", s_colors)
 
     tokens = _combine_tokens(struct_out, room_out, inferred_mask)
+    tokens[sealed_mask] = "i"
     csv_path = out_dir / "floor_like.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as f:
         wr = csv.writer(f, delimiter=";", lineterminator="\n")
@@ -286,6 +320,9 @@ def run(space_npy: Path, room_npy: Path, config_path: Path, out_dir: Path) -> No
     )
     (out_dir / "opening_adjacency_report.txt").write_text(
         "\n".join(opening_fix_report) + ("\n" if opening_fix_report else ""), encoding="utf-8",
+    )
+    (out_dir / "seal_boundary_report.txt").write_text(
+        "\n".join(seal_report) + ("\n" if seal_report else ""), encoding="utf-8",
     )
     try:
         write_review_bundle(out_dir, config_path, security_level="optimal")
