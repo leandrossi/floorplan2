@@ -19,8 +19,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from opening_adjacency import enforce_opening_adjacency
 from pipeline_common import DEFAULT_CONFIG, PROJECT_ROOT, load_config, save_json, save_matrix_png
 from review_bundle_io import write_review_bundle
+from struct_border_exterior_pad import pad_struct_grids_in_place
 
 STEP02_DIR = PROJECT_ROOT / "output" / "final" / "step02"
 STEP03_DIR = PROJECT_ROOT / "output" / "final" / "step03"
@@ -55,67 +57,6 @@ def _free_cell_vote(block: np.ndarray) -> int:
     n0 = int(np.sum(block == 0))
     n4 = int(np.sum(block == 4))
     return 4 if n4 >= n0 else 0
-
-
-def _enforce_opening_adjacency(
-    struct_m: np.ndarray,
-    free_pref: np.ndarray,
-) -> list[str]:
-    """
-    Ensure opening topology in final grid:
-    - long sides (orientation axis) should open to free space (0/4), not wall
-    - short sides should keep wall continuity (1)
-    """
-    out = struct_m
-    logs: list[str] = []
-
-    for opening_val, label in ((2, "window"), (3, "door")):
-        ncc, labels = cv2.connectedComponents((out == opening_val).astype(np.uint8), connectivity=4)
-        for cc in range(1, ncc):
-            ys, xs = np.where(labels == cc)
-            if ys.size == 0:
-                continue
-            y0, y1 = int(ys.min()), int(ys.max())
-            x0, x1 = int(xs.min()), int(xs.max())
-            h = y1 - y0 + 1
-            w = x1 - x0 + 1
-            orient = "H" if w >= h else "V"
-            changes_long = 0
-            changes_short = 0
-
-            if orient == "H":
-                # long sides: top and bottom
-                for x in range(x0, x1 + 1):
-                    for y in (y0 - 1, y1 + 1):
-                        if 0 <= y < out.shape[0] and 0 <= x < out.shape[1] and out[y, x] == 1:
-                            out[y, x] = int(free_pref[y, x])
-                            changes_long += 1
-                # short sides: left and right
-                for y in range(y0, y1 + 1):
-                    for x in (x0 - 1, x1 + 1):
-                        if 0 <= y < out.shape[0] and 0 <= x < out.shape[1] and out[y, x] in (0, 4):
-                            out[y, x] = 1
-                            changes_short += 1
-            else:
-                # long sides: left and right
-                for y in range(y0, y1 + 1):
-                    for x in (x0 - 1, x1 + 1):
-                        if 0 <= y < out.shape[0] and 0 <= x < out.shape[1] and out[y, x] == 1:
-                            out[y, x] = int(free_pref[y, x])
-                            changes_long += 1
-                # short sides: top and bottom
-                for x in range(x0, x1 + 1):
-                    for y in (y0 - 1, y1 + 1):
-                        if 0 <= y < out.shape[0] and 0 <= x < out.shape[1] and out[y, x] in (0, 4):
-                            out[y, x] = 1
-                            changes_short += 1
-
-            if changes_long or changes_short:
-                logs.append(
-                    f"{label}[cc={cc}] orient={orient} bbox=({y0}:{y1},{x0}:{x1}) "
-                    f"long_side_wall_to_free={changes_long} short_side_free_to_wall={changes_short}"
-                )
-    return logs
 
 
 def _seal_exterior_interior_boundary(
@@ -277,7 +218,13 @@ def run(space_npy: Path, room_npy: Path, config_path: Path, out_dir: Path) -> No
             room_out[gi, gj] = _room_vote(room[ys:ye, xs:xe])
             free_pref[gi, gj] = _free_cell_vote(sb)
 
-    opening_fix_report = _enforce_opening_adjacency(struct_out, free_pref)
+    pad_report: list[str] = []
+    if bool(mx.get("pad_exterior_border", True)):
+        struct_out, room_out, free_pref, _cum_pad, pad_report = pad_struct_grids_in_place(
+            struct_out, room_out, free_pref, max_passes=4
+        )
+
+    opening_fix_report = enforce_opening_adjacency(struct_out, free_pref)
     sealed_mask, seal_report = _seal_exterior_interior_boundary(struct_out)
 
     inferred_mask, infer_report = _label_inferred_interior_components(struct_out, room_out)
@@ -304,9 +251,12 @@ def run(space_npy: Path, room_npy: Path, config_path: Path, out_dir: Path) -> No
 
     meta = {
         "cell_size_px": cell_px,
-        "grid_shape": [int(Hc), int(Wc)],
+        "grid_shape": [int(struct_out.shape[0]), int(struct_out.shape[1])],
         "source_shape": [h, w],
+        "downsample_grid_shape": [int(Hc), int(Wc)],
         "wall_fill_ratio": wall_fill,
+        "pad_exterior_border_applied": bool(mx.get("pad_exterior_border", True)),
+        "exterior_border_pad_log": pad_report,
         "unique_tokens": sorted({str(x) for x in np.unique(tokens)}),
         "token_meaning": {
             "#": "wall", "W": "window", "D": "door",
@@ -320,6 +270,9 @@ def run(space_npy: Path, room_npy: Path, config_path: Path, out_dir: Path) -> No
     )
     (out_dir / "opening_adjacency_report.txt").write_text(
         "\n".join(opening_fix_report) + ("\n" if opening_fix_report else ""), encoding="utf-8",
+    )
+    (out_dir / "exterior_border_pad_report.txt").write_text(
+        "\n".join(pad_report) + ("\n" if pad_report else ""), encoding="utf-8",
     )
     (out_dir / "seal_boundary_report.txt").write_text(
         "\n".join(seal_report) + ("\n" if seal_report else ""), encoding="utf-8",

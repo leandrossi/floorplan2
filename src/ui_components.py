@@ -1,7 +1,7 @@
 """
 Shared UI helpers for floorplan visualization.
 
-Used by both matrix_review_app.py (advanced tool) and wizard_app.py (user wizard).
+Used by wizard_app.py.
 """
 from __future__ import annotations
 
@@ -33,6 +33,30 @@ DEVICE_STYLE: dict[str, dict[str, object]] = {
 # ``overlay_markers(..., marker_radius=2)`` for puerta principal / tablero.
 DEVICE_DRAW_RADIUS: int = 2
 
+# Wizard: validation highlight on struct preview (row, col cells).
+VALIDATION_ERROR_OVERLAY_RGB: tuple[int, int, int] = (255, 0, 180)
+VALIDATION_WARNING_SHORT_FREE_RGB: tuple[int, int, int] = (255, 165, 0)
+# Muro en cara larga: la celda suele ser struct=1 (gris oscuro); color muy distinto.
+VALIDATION_WARNING_LONG_WALL_RGB: tuple[int, int, int] = (0, 255, 220)
+
+# Leyenda paso 2 (textos en español).
+WIZARD_VALIDATION_LEGEND_ROWS: tuple[tuple[tuple[int, int, int], str], ...] = (
+    (VALIDATION_WARNING_SHORT_FREE_RGB, "Advertencia · exterior/interior en cara corta de apertura"),
+    (VALIDATION_WARNING_LONG_WALL_RGB, "Advertencia · muro en cara larga de ventana o puerta"),
+    (VALIDATION_ERROR_OVERLAY_RGB, "Error · topología o marcadores (bloquea propuesta)"),
+)
+
+
+def wizard_legend_swatch_row_html(rgb: tuple[int, int, int], label: str) -> str:
+    """One row: colored square + label (same layout as struct legend in wizard)."""
+    r, g, b = rgb
+    return (
+        f'<div style="display:flex;align-items:center;gap:6px;margin:0.35em 0">'
+        f'<div style="min-width:18px;width:18px;height:18px;flex-shrink:0;'
+        f'background:rgb({r},{g},{b});border:1px solid #999;border-radius:3px"></div>'
+        f'<span style="font-size:13px;line-height:1.35">{label}</span></div>'
+    )
+
 
 def rgb_from_struct(z: np.ndarray) -> np.ndarray:
     """H x W x 3 RGB image, one pixel per cell."""
@@ -41,6 +65,43 @@ def rgb_from_struct(z: np.ndarray) -> np.ndarray:
     for k, col in STRUCT_RGB.items():
         rgb[z == k] = col
     return rgb
+
+
+def overlay_validation_highlights(
+    rgb: np.ndarray,
+    *,
+    error_cells: set[tuple[int, int]] | None = None,
+    warning_short_free_cells: set[tuple[int, int]] | None = None,
+    warning_long_wall_cells: set[tuple[int, int]] | None = None,
+    error_alpha: float = 0.52,
+    warning_alpha: float = 0.42,
+    long_wall_alpha: float = 0.55,
+) -> np.ndarray:
+    """Tint grid cells that appear in topology / placement validation (row, col)."""
+    out = rgb.copy()
+    h, w = rgb.shape[:2]
+    if warning_long_wall_cells:
+        lm = np.zeros((h, w), dtype=bool)
+        for r, c in warning_long_wall_cells:
+            if 0 <= r < h and 0 <= c < w:
+                lm[r, c] = True
+        if lm.any():
+            out = alpha_blend(out, lm, VALIDATION_WARNING_LONG_WALL_RGB, alpha=long_wall_alpha)
+    if warning_short_free_cells:
+        wm = np.zeros((h, w), dtype=bool)
+        for r, c in warning_short_free_cells:
+            if 0 <= r < h and 0 <= c < w:
+                wm[r, c] = True
+        if wm.any():
+            out = alpha_blend(out, wm, VALIDATION_WARNING_SHORT_FREE_RGB, alpha=warning_alpha)
+    if error_cells:
+        em = np.zeros((h, w), dtype=bool)
+        for r, c in error_cells:
+            if 0 <= r < h and 0 <= c < w:
+                em[r, c] = True
+        if em.any():
+            out = alpha_blend(out, em, VALIDATION_ERROR_OVERLAY_RGB, alpha=error_alpha)
+    return out
 
 
 def overlay_markers(

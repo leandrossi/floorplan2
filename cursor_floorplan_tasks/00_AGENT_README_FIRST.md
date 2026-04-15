@@ -1,7 +1,7 @@
 # READ THIS FIRST — Cursor Agent Instructions
 
 ## Purpose
-This folder contains the project context and the task breakdown for the **Floorplan to Matrix Pipeline**.
+This folder contains the project context and the task breakdown for the **Floorplan to Matrix Pipeline** (final unified flow).
 
 The goal is to let the Cursor agent read the files in order and execute the work with a clear understanding of:
 - project objective,
@@ -20,13 +20,11 @@ Read the files in this exact order:
 3. `02_PIPELINE_OVERVIEW.md`
 4. `03_DATA_CONTRACTS.md`
 5. `04_TESTING_AND_DEBUG_RULES.md`
-6. `tasks/TASK_01_PARSE_AND_NORMALIZE_INPUTS.md`
-7. `tasks/TASK_02_RASTERIZE_STRUCTURE.md`
-8. `tasks/TASK_03_REPAIR_WALL_TOPOLOGY.md`
-9. `tasks/TASK_04_BUILD_STRUCTURAL_MASK.md`
-10. `tasks/TASK_05_CLASSIFY_EXTERIOR_INTERIOR.md`
-11. `tasks/TASK_06_ASSIGN_ROOMS.md`
-12. `tasks/TASK_07_BUILD_FINAL_OUTPUTS.md`
+6. `tasks/FINAL_STEP_01_PARSE_RASTERIZE.md`
+7. `tasks/FINAL_STEP_02_CLASSIFY_SPACE.md`
+8. `tasks/FINAL_STEP_03_ASSIGN_ROOMS.md`
+9. `tasks/FINAL_STEP_04_MATRIX_CSV.md`
+10. `tasks/FINAL_STEP_05_PLAN_ALARM.md`
 
 ## Important decisions already closed
 Do not reopen these decisions unless the user explicitly changes them.
@@ -58,5 +56,5 @@ Do not reopen these decisions unless the user explicitly changes them.
 - Python
 - Simple file-based pipeline
 - Clear CLI entry point per step
-- Numpy/OpenCV/Pillow/scikit-image style utilities are acceptable
+- Numpy/OpenCV/Pillow style utilities are acceptable
 - Prefer easy-to-debug procedural code

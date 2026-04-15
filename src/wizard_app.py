@@ -31,16 +31,18 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from pipeline_common import PROJECT_ROOT, load_config, save_json
+from grid_topology_validate import build_validation_checklist, collect_validation_highlight_cells
 from review_bundle_io import (
     STRUCT_ENCODING,
     apply_struct_patches,
     load_approved,
-    validate_approved,
     write_review_bundle,
 )
 from ui_components import (
     DEVICE_STYLE,
     STRUCT_RGB,
+    WIZARD_VALIDATION_LEGEND_ROWS,
+    wizard_legend_swatch_row_html,
     alpha_blend,
     compute_pre_suppression_red_mask,
     draw_square,
@@ -49,6 +51,7 @@ from ui_components import (
     inject_wizard_css,
     load_step05_outputs,
     overlay_markers,
+    overlay_validation_highlights,
     render_proposal_views,
     render_stepper,
     rgb_from_struct,
@@ -59,6 +62,11 @@ try:
     from streamlit_image_coordinates import streamlit_image_coordinates
 except ImportError:
     streamlit_image_coordinates = None  # type: ignore[misc,assignment]
+
+try:
+    from streamlit_grid_paint import grid_paint_image
+except ImportError:
+    grid_paint_image = None  # type: ignore[misc,assignment]
 
 DEFAULT_CONFIG = _PROJECT_ROOT / "config" / "pipeline_config.json"
 OUTPUT_DIR = _PROJECT_ROOT / "output"
@@ -97,6 +105,7 @@ def _init_state() -> None:
         "security_label": "Optimo",
         "cell_size_m": 0.05,
         "_img_click_sig": None,
+        "_last_paint_dedupe": None,
         "_flash": None,
         "step05_dir": None,
         "proposal": None,
@@ -113,6 +122,7 @@ def _reset_plan_state_for_new_upload() -> None:
     st.session_state.main_entry = None
     st.session_state.electric_board = None
     st.session_state._img_click_sig = None
+    st.session_state._last_paint_dedupe = None
     st.session_state.step05_dir = None
     st.session_state.proposal = None
     st.session_state.report = None
@@ -243,6 +253,7 @@ def _load_bundle_into_session(step04_dir: Path) -> None:
     st.session_state.main_entry = None
     st.session_state.electric_board = None
     st.session_state._img_click_sig = None
+    st.session_state._last_paint_dedupe = None
 
 
 def render_step1() -> None:
@@ -352,6 +363,45 @@ def _patch_map_to_list(pm: dict[tuple[int, int], int]) -> list[dict[str, int]]:
     return [{"r": r, "c": c, "v": int(v)} for (r, c), v in sorted(pm.items())]
 
 
+def _apply_paint_stroke(val: dict, paint_val: int, w: int, h: int) -> bool:
+    """Apply stroke to ``patch_map``. Returns True if new paint was applied."""
+    if val.get("kind") != "stroke":
+        return False
+    raw_cells = val.get("cells") or []
+    cells_t: list[tuple[int, int]] = []
+    for pair in raw_cells:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        cx, cy = int(pair[0]), int(pair[1])
+        if 0 <= cx < w and 0 <= cy < h:
+            cells_t.append((cx, cy))
+    if not cells_t:
+        return False
+    # One physical stroke from the component must apply once; brush value at apply time only.
+    stroke_dedupe_key = (val.get("stroke_id"), tuple(cells_t))
+    last_d = st.session_state.get("_last_paint_dedupe")
+    if stroke_dedupe_key == last_d:
+        return False
+    st.session_state._last_paint_dedupe = stroke_dedupe_key
+    pv = int(paint_val)
+    for cx, cy in cells_t:
+        st.session_state.patch_map[(cy, cx)] = pv
+    return True
+
+
+def _apply_grid_pick(val: dict, mode: str, paint_val: int | None, w: int, h: int, eff: np.ndarray) -> None:
+    """Single-cell pick from grid_paint (puerta/tablero); dedupe Streamlit value echo."""
+    if val.get("kind") != "pick":
+        return
+    cx, cy = int(val["cx"]), int(val["cy"])
+    pid = val.get("pick_id") if val.get("pick_id") is not None else val.get("stroke_id")
+    key = ("grid_pick", pid, cx, cy)
+    if key == st.session_state.get("_last_grid_pick_dedupe"):
+        return
+    st.session_state._last_grid_pick_dedupe = key
+    _apply_click(cx, cy, mode, paint_val, w, h, eff)
+
+
 def _apply_click(
     cx: int, cy: int, mode: str, paint_val: int | None,
     w: int, h: int, eff: np.ndarray,
@@ -388,6 +438,19 @@ def render_step2() -> None:
     struct_base: np.ndarray = st.session_state.struct_base
     h, w = struct_base.shape
     eff = effective_struct(struct_base, st.session_state.patch_map)
+    approved_dict = {
+        "version": 1,
+        "main_entry": st.session_state.get("main_entry"),
+        "electric_board": st.session_state.get("electric_board"),
+        "struct_patch": _patch_map_to_list(st.session_state.patch_map),
+        "source_bundle": st.session_state.get("step04_dir"),
+    }
+    err_hl, warn_short_hl, warn_long_wall_hl = collect_validation_highlight_cells(
+        eff,
+        approved_dict,
+        require_markers=True,
+        main_entry_must_touch_exterior=True,
+    )
 
     st.header("2. Configurar")
 
@@ -408,6 +471,10 @@ def render_step2() -> None:
                 "Pincel (struct)",
                 options=list(range(5)),
                 format_func=lambda v: f"{v} = {STRUCT_ENCODING.get(v, v)}",
+            )
+            st.caption(
+                "🖌️ **Modo edición:** al pasar el mouse sobre el mapa verás el cursor en **cruz**; "
+                "al pintar, **mano cerrada** (arrastrando)."
             )
 
         st.divider()
@@ -443,6 +510,8 @@ def render_step2() -> None:
             st.rerun()
         if st.button("Limpiar parches"):
             st.session_state.patch_map = {}
+            st.session_state._last_paint_dedupe = None
+            st.session_state._last_grid_pick_dedupe = None
             st.rerun()
 
     with preview_area:
@@ -450,12 +519,20 @@ def render_step2() -> None:
             "Ver": "Modo visualización. Seleccioná una herramienta para editar.",
             "Puerta principal": "Hacé click en una celda **puerta** (verde, struct=3).",
             "Tablero eléctrico": "Hacé click en una celda **interior** (beige, struct=4).",
-            "Pintar celda": "Hacé click para pintar con el pincel seleccionado.",
+            "Pintar celda": "Mantené clic y arrastrá para pintar; soltá el mouse para aplicar el trazo.",
         }
         st.info(mode_hints.get(mode, ""))
 
+        rgb = rgb_from_struct(eff)
+        if err_hl or warn_short_hl or warn_long_wall_hl:
+            rgb = overlay_validation_highlights(
+                rgb,
+                error_cells=err_hl,
+                warning_short_free_cells=warn_short_hl,
+                warning_long_wall_cells=warn_long_wall_hl,
+            )
         rgb = overlay_markers(
-            rgb_from_struct(eff),
+            rgb,
             main_entry=st.session_state.get("main_entry"),
             electric_board=st.session_state.get("electric_board"),
             marker_radius=2,
@@ -463,7 +540,41 @@ def render_step2() -> None:
         disp_w = int(img_width)
         rgb_up = upscale_rgb(rgb, disp_w)
 
-        if streamlit_image_coordinates is not None and mode != "Ver":
+        use_grid_paint = grid_paint_image is not None
+        if use_grid_paint:
+            enable_paint = mode == "Pintar celda" and paint_val is not None
+            pick_on_click = mode in ("Puerta principal", "Tablero eléctrico")
+            paint_ret = grid_paint_image(
+                rgb_up,
+                grid_w=w,
+                grid_h=h,
+                width=rgb_up.shape[1],
+                height=rgb_up.shape[0],
+                key="wiz_grid_paint",
+                cursor="crosshair",
+                enable_paint=enable_paint,
+                pick_on_click=pick_on_click,
+            )
+            if paint_ret is not None and isinstance(paint_ret, dict):
+                if paint_ret.get("kind") == "stroke" and enable_paint:
+                    if _apply_paint_stroke(paint_ret, int(paint_val), w, h):
+                        st.rerun()
+                elif paint_ret.get("kind") == "pick" and pick_on_click:
+                    _apply_grid_pick(paint_ret, mode, paint_val, w, h, eff)
+            cap_bits: list[str] = [
+                "Sobre el mapa: **col · fila** en la esquina (coordenadas de grilla).",
+            ]
+            if enable_paint:
+                cap_bits.append(
+                    f"Pincel struct={paint_val} · {len(st.session_state.patch_map)} parches · "
+                    "arrastrá y soltá para fijar el trazo."
+                )
+            elif pick_on_click:
+                cap_bits.append("Cliqueá una celda del mapa.")
+            if err_hl or warn_short_hl or warn_long_wall_hl:
+                cap_bits.append("Leyenda de colores en el panel **Leyenda**.")
+            st.caption(" ".join(cap_bits))
+        elif streamlit_image_coordinates is not None and mode != "Ver":
             coord = streamlit_image_coordinates(
                 rgb_up,
                 key="wiz_struct_click",
@@ -488,9 +599,18 @@ def render_step2() -> None:
         else:
             st.image(rgb_up)
             if streamlit_image_coordinates is None and mode != "Ver":
-                st.warning("Instalá `streamlit-image-coordinates` para hacer click: `pip install streamlit-image-coordinates`")
+                st.warning(
+                    "Instalá `streamlit-image-coordinates` para marcar puerta/tablero: "
+                    "`pip install streamlit-image-coordinates`"
+                )
+            if mode == "Pintar celda" and grid_paint_image is None:
+                st.warning(
+                    "El componente de pintura por arrastre no está disponible "
+                    "(falta `src/streamlit_grid_paint`)."
+                )
 
         with st.expander("Leyenda"):
+            st.markdown("**Estructura**")
             cols = st.columns(5)
             for i, (code, name) in enumerate(STRUCT_ENCODING.items()):
                 r, g, b = STRUCT_RGB[code]
@@ -500,50 +620,72 @@ def render_step2() -> None:
                     f'<span style="font-size:13px">{code} = {name}</span></div>',
                     unsafe_allow_html=True,
                 )
-            st.caption("Rojo = puerta principal · Azul = tablero eléctrico")
+            st.markdown(
+                wizard_legend_swatch_row_html((255, 0, 0), "Marcador · puerta principal")
+                + wizard_legend_swatch_row_html((0, 0, 255), "Marcador · tablero eléctrico"),
+                unsafe_allow_html=True,
+            )
+            st.markdown("**Errores**")
+            for vrgb, vlabel in WIZARD_VALIDATION_LEGEND_ROWS:
+                st.markdown(wizard_legend_swatch_row_html(vrgb, vlabel), unsafe_allow_html=True)
 
-    err, warn = validate_approved(
-        {
-            "version": 1,
-            "main_entry": st.session_state.get("main_entry"),
-            "electric_board": st.session_state.get("electric_board"),
-            "struct_patch": _patch_map_to_list(st.session_state.patch_map),
-            "source_bundle": st.session_state.get("step04_dir"),
-        },
+    checklist = build_validation_checklist(
         eff,
+        approved_dict,
         require_markers=True,
+        main_entry_must_touch_exterior=True,
     )
+    err_blocking = any(not it.ok and it.blocks_proposal for it in checklist)
 
     st.divider()
     bcol1, bcol2, bcol3 = st.columns([2, 1, 1])
     with bcol1:
-        if err:
-            st.error("Antes de continuar: " + " · ".join(err))
-        else:
-            st.success("Listo para generar la propuesta.")
+        st.markdown("**Validación**")
+        rows: list[str] = []
+        for it in checklist:
+            color = "#2e7d32" if it.ok else "#c62828"
+            sym = "●"
+            sub = ""
+            if not it.ok and it.detail:
+                esc = (
+                    it.detail.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
+                sub = f'<div style="font-size:0.88em;opacity:0.92;margin-top:2px">{esc}</div>'
+            rows.append(
+                f'<li style="color:{color};margin:0.2em 0;">'
+                f'<span style="margin-right:6px">{sym}</span>{it.label}{sub}</li>'
+            )
+        st.markdown(
+            '<ul style="list-style:none;padding-left:0;margin:0;">'
+            + "".join(rows)
+            + "</ul>",
+            unsafe_allow_html=True,
+        )
     with bcol2:
         if st.button("Volver", use_container_width=True):
             st.session_state.wiz_step = 1
             st.rerun()
     with bcol3:
-        if st.button("Generar propuesta", type="primary", disabled=bool(err), use_container_width=True):
+        if st.button("Generar propuesta", type="primary", disabled=err_blocking, use_container_width=True):
             _save_approved_and_advance(eff)
 
 
 def _save_approved_and_advance(eff: np.ndarray) -> None:
+    sec_code = SECURITY_LEVELS[st.session_state.security_label]
     approved = {
         "version": 1,
         "main_entry": st.session_state.get("main_entry"),
         "electric_board": st.session_state.get("electric_board"),
         "struct_patch": _patch_map_to_list(st.session_state.patch_map),
         "source_bundle": st.session_state.get("step04_dir"),
+        "security_level": sec_code,
         "approved_at": datetime.now(timezone.utc).isoformat(),
     }
     step04_dir = Path(st.session_state.step04_dir)
     out_p = step04_dir / "review_approved.json"
     out_p.write_text(json.dumps(approved, indent=2), encoding="utf-8")
-
-    sec_code = SECURITY_LEVELS[st.session_state.security_label]
     bar = st.progress(0, text="Ejecutando plan de alarma (step 05)...")
 
     try:
@@ -598,6 +740,19 @@ def render_step3() -> None:
     m2.metric("Dispositivos", total_devices)
     m3.metric("Advertencias", n_warnings)
     m4.metric("Estado", "OK" if plan_ok else "Error")
+
+    if proposal and isinstance(proposal, dict):
+        prop_sec = proposal.get("security_level")
+        if prop_sec is not None and str(prop_sec).strip() != str(sec_code).strip():
+            st.warning(
+                f"La propuesta en memoria se generó con nivel **{prop_sec}**, pero el selector "
+                f"está en **{sec_label}** (`{sec_code}`). Volvé a **Configurar** y pulsá "
+                "**Generar propuesta** para recalcular con el nivel elegido."
+            )
+    st.caption(
+        "Con **una sola puerta exterior**, Mínimo y Óptimo suelen coincidir en magnéticos (ambos cubren la entrada). "
+        "Las diferencias aparecen con **varias puertas** o al pasar a **Máximo** (también ventanas)."
+    )
 
     st.divider()
 

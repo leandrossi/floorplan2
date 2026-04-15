@@ -1,57 +1,47 @@
-# Pipeline Overview
+# Pipeline Overview (final flow)
 
-## Final pipeline
-The pipeline is split into 7 executable steps.
+## Summary
+The shipped pipeline has **five** executable steps under `src/final_step*.py`, plus **Roboflow** for detection JSON and optional **Streamlit** (`wizard_app.py`) for human review before alarm planning.
 
-1. Parse and normalize both model outputs
-2. Rasterize the structural detections
-3. Repair wall topology
-4. Build the consolidated structural mask
-5. Classify exterior vs interior
-6. Assign room ids using topological regions + room-model proposals
-7. Build final exported outputs
+## Ingestion
+1. **Roboflow** (unified workflow): `python run_workflow_final.py <image.png>` → writes `output/result_workflow_final.json` (and optional visualization JPGs under `output/visualizations/` if enabled by the runner).
+2. **Wizard** can call the same runner after an image upload, or skip API and reuse an existing `result_workflow_final.json`.
 
-## Why this split exists
-This split is intentional.
+## Core steps (deterministic, local)
+| Step | Script | Role |
+|------|--------|------|
+| 01 | `final_step01_parse_and_rasterize.py` | Parse unified JSON → structural + room polygon rasters |
+| 02 | `final_step02_classify_space.py` | Exterior / interior / openings from structure |
+| 03 | `final_step03_assign_rooms.py` | Room ids from topology + room proposals |
+| 04 | `final_step04_build_matrix_csv.py` | Final structure + room matrices, CSVs, `review_bundle.json` |
+| 05 | `final_step05_plan_alarm.py` | Alarm plan via `vendor/acala_engine`, reads `review_approved.json` if present |
 
-The user wants:
-- one file per stage,
-- one visible output per stage,
-- the ability to evaluate behavior during experimentation,
-- no black-box monolith.
+## Orchestration
+- **Headless:** `PYTHONPATH=src python run_final_pipeline.py` runs steps 01→05 as subprocesses (after step04, message reminds to open the wizard to save `review_approved.json` if needed).
+- **UI:** `PYTHONPATH=src streamlit run src/wizard_app.py` — upload / JSON reuse → steps 01–04 → review → step05.
 
-## High-level flow
+## High-level data flow
 ```text
-result_structure.json ─┐
-                       ├─ step01 → normalized_structure.json
-result_rooms.json ─────┘           normalized_rooms.json
-
-normalized_structure.json → step02 → raw_structure_mask
-raw_structure_mask       → step03 → repaired_wall_mask
-raw_structure_mask + repaired_wall_mask → step04 → structural_mask
-structural_mask          → step05 → space_classified
-normalized_rooms.json + space_classified → step06 → room_id_matrix
-space_classified + room_id_matrix → step07 → final exported matrices
+image.png
+    → run_workflow_final.py
+        → output/result_workflow_final.json
+            → final_step01 → output/final/step01/ (*.npy, previews)
+            → final_step02 → output/final/step02/
+            → final_step03 → output/final/step03/
+            → final_step04 → output/final/step04/ (matrices, review_bundle.json)
+            → [wizard: review_approved.json]
+            → final_step05 → output/final/step05/ (proposal, CSVs, grids)
 ```
 
-## Key implementation principle
-The room segmentation must be built on top of the structural topology, not the other way around.
+## Design principle
+Room segmentation is built on structural topology first; room-model polygons assist assignment but do not replace flood-fill regions derived from walls/doors/windows.
 
-That means:
-- first understand where the structure closes,
-- then identify interior regions,
-- then map room-model predictions to those real regions.
+## Output layers (final matrices)
+### Structural (`final_structure_matrix`)
+- `0` exterior, `1` wall, `2` window, `3` door, `4` interior
 
-## Output layers
-### Layer 1 — Structure
-- exterior
-- wall
-- window
-- door
-- interior
+### Room ids (`final_rooms_matrix`)
+- `0` non-room / structure / exterior
+- `1..N` room ids for interior free space
 
-### Layer 2 — Room ids
-- no-room / non-free-space
-- room ids for free interior cells
-
-Keep these layers separate.
+Keep these layers separate until downstream consumers merge them (e.g. step05 / exports).

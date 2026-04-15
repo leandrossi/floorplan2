@@ -48,6 +48,7 @@
     "cell_size_cm": 5,
     "cell_size_px": 5,
     "pixels_per_meter": null,
-    "wall_fill_ratio": 0.2
+    "wall_fill_ratio": 0.2,
+    "pad_exterior_border": true
   }
 }

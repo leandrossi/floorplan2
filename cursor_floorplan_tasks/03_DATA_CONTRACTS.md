@@ -1,97 +1,77 @@
-# Data Contracts
+# Data Contracts (final pipeline)
 
-## Input directory
-```text
-input/
-├─ Floorplan2.png
-├─ result_structure.json
-└─ result_rooms.json
-```
+## Inputs
+### Roboflow unified JSON
+- **Path (default):** `output/result_workflow_final.json`
+- **Produced by:** `run_workflow_final.py` or the wizard after image upload.
+- **Shape:** Roboflow workflow with `runs[0].workflow_output[0]` containing:
+  - `structural_predictions` (bbox-style wall/window/door),
+  - `room_predictions` (polygon `room` detections),
+  - embedded `image` width/height.
 
-## Output directory
+### Configuration
+- **`config/pipeline_config.json`** — cell size, thresholds, planner-related settings loaded by final steps and step05.
+
+## Output directory layout
+Only **`output/final/`** and the **unified JSON** at `output/result_workflow_final.json` are part of the current contract. Legacy paths `output/step01` … `output/step09` are not used.
+
 ```text
 output/
-├─ step01/
-├─ step02/
-├─ step03/
-├─ step04/
-├─ step05/
-├─ step06/
-└─ step07/
+├─ result_workflow_final.json          # Roboflow unified result (regenerable)
+└─ final/
+   ├─ step01/
+   ├─ step02/
+   ├─ step03/
+   ├─ step04/
+   └─ step05/
 ```
 
-## Step 01 outputs
-- `normalized_structure.json`
-- `normalized_rooms.json`
-- `summary.txt`
+## Step 01 (`output/final/step01/`)
+- `structural_mask.npy`, `room_polygons.npy`
+- `structural_mask.png`, `room_polygons.png`
+- `parse_report.txt`, `parse_meta.json`
 
-## Step 02 outputs
-- `raw_structure_mask.npy`
-- `raw_structure_mask.png`
-- `raw_structure_overlay.png`
+## Step 02 (`output/final/step02/`)
+- `space_classified.npy` — full 0–4 space classification
+- `space_classified.png`, `space_overlay.png`
+- `classify_report.txt`
 
-## Step 03 outputs
-- `repaired_wall_mask.npy`
-- `repaired_wall_mask.png`
-- `wall_diff.png`
-- `wall_repair_report.txt`
-
-## Step 04 outputs
-- `structural_mask.npy`
-- `structural_mask.png`
-- `structural_overlay.png`
-- `structural_conflicts_report.txt`
-
-## Step 05 outputs
-- `space_classified.npy`
-- `space_classified.png`
-- `space_overlay.png`
-- `regions_report.txt`
-
-## Step 06 outputs
+## Step 03 (`output/final/step03/`)
 - `room_id_matrix.npy`
-- `room_id_matrix.csv`
 - `room_id_preview.png`
-- `rooms_match_report.txt`
+- `rooms_report.txt`
 
-## Step 07 outputs
-- `final_structure_matrix.npy`
-- `final_structure_matrix.csv`
-- `final_rooms_matrix.npy`
-- `final_rooms_matrix.csv`
-- `final_structure_preview.png`
-- `final_rooms_preview.png`
+## Step 04 (`output/final/step04/`)
+- `final_structure_matrix.npy`, `final_rooms_matrix.npy`, `final_rooms_inferred_mask.npy`
+- `final_structure_matrix.csv`, `final_rooms_matrix.csv`
+- `floor_like.csv`, `floor_like_tokens.npy` (optional downstream)
+- Previews: `final_structure_preview.png`, `floor_like_preview.png`
+- Human review: `review_bundle.json`; saved approvals: `review_approved.json`
+- Reports: `infer_report.txt`, `opening_adjacency_report.txt`, etc.
 - `final_metadata.json`
 
-## Structural class encoding
-Use this encoding consistently once the structural mask is consolidated:
-- `0 = exterior`
-- `1 = wall`
-- `2 = window`
-- `3 = door`
-- `4 = interior`
+## Step 05 (`output/final/step05/`)
+- `installation_proposal.json`, `alarm_plan_report.json`
+- `final_floorplan_grid.json`, `final_structure_effective.npy`
+- `devices_layer.csv`, `floor_like_with_devices.csv`
+- Renders: `floorplan_clean.png`, `floorplan_devices.png`, `floorplan_ai_reference.png`
+
+## Structural class encoding (final matrices)
+- `0` exterior
+- `1` wall
+- `2` window
+- `3` door
+- `4` interior
 
 ## Room-id encoding
-Use this encoding consistently for room labels:
-- `0 = not-a-room / exterior / structure`
-- `1..N = room ids`
+- `0` not-a-room / exterior / structure
+- `1..N` room ids
 
-## Mask conventions during intermediate steps
-### Step 02 and Step 04 structural raster masks
-- `0 = empty`
-- `1 = wall`
-- `2 = window`
-- `3 = door`
-
-### Step 05 classified space
-- `0 = exterior`
-- `1 = wall`
-- `2 = window`
-- `3 = door`
-- `4 = interior`
-
-## Fallback policy
-If a prediction lacks polygon points but has a valid bbox, bbox may be used as fallback in Step 01 normalization.
+## Intermediate mask (step01 structural raster)
+- `0` free
+- `1` wall
+- `2` window
+- `3` door
 
 ## Scale policy
-If real-world scale is not available, the pipeline must work in `relative_scale` mode and state that clearly in metadata.
+If real-world scale is not available, metadata must state `relative_scale` (or equivalent) explicitly.

@@ -136,16 +136,6 @@ def validate_approved(
                 errors.append(f"main_entry ({r},{c}) out of bounds")
             elif int(struct[r, c]) != 3:
                 errors.append(f"main_entry must be on a door cell (struct=3), got {int(struct[r, c])}")
-            else:
-                # warn if not touching exterior
-                touches = False
-                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    nr, nc = r + dr, c + dc
-                    if 0 <= nr < h and 0 <= nc < w and int(struct[nr, nc]) == 0:
-                        touches = True
-                        break
-                if not touches:
-                    warnings.append("main_entry door is not 4-adjacent to exterior (unusual for façade door)")
 
     if eb is not None:
         if not isinstance(eb, (list, tuple)) or len(eb) != 2:

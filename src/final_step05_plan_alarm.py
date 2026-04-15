@@ -28,6 +28,7 @@ from typing import Any
 
 import numpy as np
 
+from grid_topology_validate import validate_grid_for_alarm
 from pipeline_common import DEFAULT_CONFIG, PROJECT_ROOT, load_config, save_json
 from review_bundle_io import apply_struct_patches, build_final_floorplan_grid_dict, load_approved
 
@@ -251,13 +252,23 @@ def _write_semicolon_csv(path: Path, rows: list[list[str]]) -> None:
             wr.writerow(row)
 
 
+def _coerce_security_level(raw: object | None) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if s in ("min", "optimal", "max"):
+        return s
+    return None
+
+
 def run(
     step04_dir: Path,
     config_path: Path,
     out_dir: Path,
     *,
-    security_level: str = "optimal",
+    security_level: str | None = "optimal",
     review_path: Path | None = None,
+    skip_grid_validation: bool = False,
 ) -> None:
     from acala_engine import build_scenario, plan_installation
     from acala_engine.io_json import installation_to_dict
@@ -303,6 +314,15 @@ def run(
 
     approved_path = review_path if review_path is not None else (step04_dir / "review_approved.json")
     approved = load_approved(approved_path) if approved_path.is_file() else None
+
+    effective_security = _coerce_security_level(security_level)
+    if effective_security is None and approved:
+        effective_security = _coerce_security_level(approved.get("security_level"))
+    if effective_security is None:
+        effective_security = "optimal"
+    security_level = effective_security
+    report["security_level"] = security_level
+
     element_source = "heuristic"
 
     if approved:
@@ -337,6 +357,29 @@ def run(
         if board_cell is None:
             report["warnings"].append("No interior cells; electric_board not set.")
 
+    if not skip_grid_validation:
+        approved_for_val: dict[str, Any] = {
+            "version": 1,
+            "main_entry": list(main_cell) if main_cell is not None else None,
+            "electric_board": list(board_cell) if board_cell is not None else None,
+            "struct_patch": (approved.get("struct_patch") if approved else None) or [],
+        }
+        markers_ok = main_cell is not None and board_cell is not None
+        val_err, val_warn = validate_grid_for_alarm(
+            struct_m,
+            approved_for_val,
+            require_markers=markers_ok,
+            main_entry_must_touch_exterior=markers_ok,
+        )
+        report["warnings"].extend(val_warn)
+        if val_err:
+            report["errors"].extend(val_err)
+            report["grid_validation_failed"] = True
+            out_dir.mkdir(parents=True, exist_ok=True)
+            save_json(out_dir / "alarm_plan_report.json", report)
+            print(f"FinalStep05 ABORTED: grid validation failed: {val_err}", flush=True)
+            return
+
     report["inferred_elements"] = {
         "main_entry": list(main_cell) if main_cell else None,
         "electric_board": list(board_cell) if board_cell else None,
@@ -359,7 +402,7 @@ def run(
             notes=f"Elements source: {element_source}.",
         )
         report["warnings"].extend(_diagnose_red_zone_seeding(scenario.grid_map))
-        proposal = plan_installation(scenario)
+        proposal = plan_installation(scenario, security_level=scenario.security_level)
     except Exception as e:  # noqa: BLE001
         report["errors"].append(f"plan_installation failed: {e!r}")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -441,15 +484,22 @@ def main() -> None:
     ap.add_argument(
         "--security-level",
         choices=("min", "optimal", "max"),
-        default="optimal",
+        default=None,
+        help="Perfil de planificación. Si se omite, se usa security_level de review_approved.json si existe; si no, optimal.",
+    )
+    ap.add_argument(
+        "--skip-grid-validation",
+        action="store_true",
+        help="Skip pre-flight topology/markers validation (debug only).",
     )
     args = ap.parse_args()
     run(
         args.step04,
         args.config,
         args.out,
-        security_level=args.security_level,
+        security_level=args.security_level,  # None → approved file or optimal
         review_path=args.review,
+        skip_grid_validation=args.skip_grid_validation,
     )
 
 

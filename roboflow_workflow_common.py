@@ -20,6 +20,7 @@ from inference_sdk import InferenceHTTPClient
 
 API_URL = "https://serverless.roboflow.com"
 WORKSPACE_NAME = "basura-basura-s-workspace"
+##WORKSPACE_NAME = "floorplan-final-analysis-2"
 IMAGE_INPUT_KEY = "image"
 
 PROJECT_ROOT = Path(__file__).resolve().parent

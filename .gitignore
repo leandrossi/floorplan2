@@ -25,3 +25,6 @@ output/
 
 .DS_Store
 Thumbs.db
+
+# Cursor IDE (local plans / debug logs)
+.cursor/
