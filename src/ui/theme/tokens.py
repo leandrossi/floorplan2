@@ -1,0 +1,12 @@
+from __future__ import annotations
+
+SURFACE = "#FFFFFF"
+BACKGROUND = "#F4F7FB"
+TEXT = "#142033"
+MUTED = "#64748B"
+PRIMARY = "#1E3A8A"
+SUCCESS = "#2E7D32"
+WARNING = "#C98A00"
+DANGER = "#C62828"
+BORDER = "#D9E2F1"
+RADIUS = "18px"

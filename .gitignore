@@ -18,6 +18,7 @@ images/*.jpeg
 images/*.png
 !images/.gitkeep
 output/
+workspaces/
 
 # OS / WSL (NTFS alternate stream copies)
 *Zone.Identifier
