@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from domain.contracts import ProposalViewModel
 from domain.enums import SecurityLevel
@@ -9,9 +9,54 @@ from infrastructure.alarm_engine_adapter import AlarmEngineAdapter
 from infrastructure.artifact_store import ArtifactStore
 from infrastructure.review_bundle_adapter import ReviewBundleAdapter
 from review_bundle_io import apply_struct_patches, load_approved
-from ui_components import render_proposal_views
+from ui_components import overlay_device_icons, overlay_marker_icons, rgb_from_struct, upscale_rgb
 
 ProgressCallback = Callable[[float, str], None]
+PROPOSAL_RENDER_WIDTH = 1800
+PROPOSAL_MAP_ICON_SIZE_PX = 24
+
+
+def _neighbors4(r: int, c: int, h: int, w: int) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < h and 0 <= nc < w:
+            out.append((nr, nc))
+    return out
+
+
+def _find_keyboard_target_cell(
+    struct,
+    *,
+    main_entry: list[int],
+    blocked_cells: set[tuple[int, int]],
+) -> tuple[int, int] | None:
+    h, w = struct.shape
+    door_r, door_c = int(main_entry[0]), int(main_entry[1])
+    interior_neighbors = [
+        (r, c)
+        for (r, c) in _neighbors4(door_r, door_c, h, w)
+        if int(struct[r, c]) == 4
+    ]
+    if not interior_neighbors:
+        return None
+
+    wall_candidates: list[tuple[int, int]] = []
+    for ir, ic in interior_neighbors:
+        for wr, wc in _neighbors4(ir, ic, h, w):
+            if int(struct[wr, wc]) == 1 and (wr, wc) not in blocked_cells:
+                wall_candidates.append((wr, wc))
+    if wall_candidates:
+        wall_candidates = sorted(
+            set(wall_candidates),
+            key=lambda cell: (abs(cell[0] - door_r) + abs(cell[1] - door_c), cell[0], cell[1]),
+        )
+        return wall_candidates[0]
+
+    for ir, ic in interior_neighbors:
+        if (ir, ic) not in blocked_cells:
+            return (ir, ic)
+    return None
 
 
 class ProposalService:
@@ -46,15 +91,61 @@ class ProposalService:
         approved = load_approved(review_approved_path) or {}
         effective_struct = apply_struct_patches(bundle.struct, approved.get("struct_patch") or [])
 
-        _, device_img, device_counts, _ = render_proposal_views(
-            effective_struct,
-            proposal=proposal,
-            show_red_zones=False,
-            show_devices=True,
-            replace_base_with_devices=True,
+        main_entry = approved.get("main_entry")
+        electric_board = approved.get("electric_board")
+        devices = [dict(d) for d in (proposal.get("devices") or []) if isinstance(d, dict)]
+        if isinstance(main_entry, list) and len(main_entry) == 2:
+            magnetic_idx = next(
+                (idx for idx, d in enumerate(devices) if str(d.get("device_type") or "").lower() == "magnetic"),
+                None,
+            )
+            keyboard_idx = next(
+                (idx for idx, d in enumerate(devices) if str(d.get("device_type") or "").lower() == "keyboard"),
+                None,
+            )
+            if magnetic_idx is not None:
+                devices[magnetic_idx]["cell"] = [int(main_entry[0]), int(main_entry[1])]
+            if keyboard_idx is not None:
+                blocked_cells: set[tuple[int, int]] = {
+                    (int(d["cell"][0]), int(d["cell"][1]))
+                    for i, d in enumerate(devices)
+                    if i != keyboard_idx
+                    and isinstance(d.get("cell"), (list, tuple))
+                    and len(d["cell"]) == 2
+                }
+                keyboard_target = _find_keyboard_target_cell(
+                    effective_struct,
+                    main_entry=main_entry,
+                    blocked_cells=blocked_cells,
+                )
+                if keyboard_target is not None:
+                    devices[keyboard_idx]["cell"] = [int(keyboard_target[0]), int(keyboard_target[1])]
+
+        device_img = rgb_from_struct(effective_struct)
+        device_img = upscale_rgb(device_img, PROPOSAL_RENDER_WIDTH)
+        device_img = overlay_marker_icons(
+            device_img,
+            grid_h=effective_struct.shape[0],
+            grid_w=effective_struct.shape[1],
+            main_entry=main_entry,
+            electric_board=electric_board,
+            icon_size_px=PROPOSAL_MAP_ICON_SIZE_PX,
+        )
+        reserved_cells: set[tuple[int, int]] = set()
+        if isinstance(main_entry, list) and len(main_entry) == 2:
+            reserved_cells.add((int(main_entry[0]), int(main_entry[1])))
+        if isinstance(electric_board, list) and len(electric_board) == 2:
+            reserved_cells.add((int(electric_board[0]), int(electric_board[1])))
+        device_img, device_counts = overlay_device_icons(
+            device_img,
+            grid_h=effective_struct.shape[0],
+            grid_w=effective_struct.shape[1],
+            devices=devices,
+            icon_size_px=PROPOSAL_MAP_ICON_SIZE_PX,
+            reserved_cells=reserved_cells,
         )
         overlay_path = self.artifact_store.write_rgb_image(
-            workspace.proposal_level_dir(level.planner_code) / "devices_overlay.png",
+            workspace.proposal_level_dir(level.planner_code) / "devices_overlay_v3.png",
             device_img,
         )
         counts = report.get("device_counts") or device_counts

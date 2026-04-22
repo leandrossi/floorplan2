@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
+import io
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import streamlit as st
+from PIL import Image, ImageDraw
 
 from ui_components import (
     overlay_markers,
@@ -22,6 +25,12 @@ try:
     from streamlit_grid_paint import grid_paint_image
 except ImportError:  # pragma: no cover - optional dependency
     grid_paint_image = None  # type: ignore[misc,assignment]
+
+
+ICON_PATHS = {
+    "main_entry": Path(__file__).resolve().parents[3] / "assets" / "icons" / "main-entry-door.png",
+    "electric_board": Path(__file__).resolve().parents[3] / "assets" / "icons" / "electric-panel.png",
+}
 
 
 def patch_list_to_map(patches: list[dict[str, int]]) -> dict[tuple[int, int], int]:
@@ -53,13 +62,128 @@ def build_review_image(
             warning_short_free_cells=warning_short_cells,
             warning_long_wall_cells=warning_long_cells,
         )
-    rgb = overlay_markers(
-        rgb,
+    upscaled = upscale_rgb(rgb, int(img_width))
+    return overlay_marker_icons(
+        upscaled,
+        grid_h=struct.shape[0],
+        grid_w=struct.shape[1],
         main_entry=main_entry,
         electric_board=electric_board,
-        marker_radius=2,
     )
-    return upscale_rgb(rgb, int(img_width))
+
+
+def _build_marker_icon(kind: str, size: int) -> np.ndarray:
+    icon_path = ICON_PATHS.get(kind)
+    if icon_path and icon_path.is_file():
+        try:
+            with Image.open(icon_path) as icon_image:
+                rgba = icon_image.convert("RGBA")
+                alpha = rgba.split()[3]
+                bbox = alpha.getbbox()
+                if bbox is not None:
+                    rgba = rgba.crop(bbox)
+                resized = rgba.resize((size, size), Image.LANCZOS)
+                return np.asarray(resized)
+        except Exception:
+            # Fallback to generated icon when external asset cannot be loaded.
+            pass
+
+    base = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(base)
+
+    if kind == "main_entry":
+        # Door-like icon on transparent canvas.
+        fill = (192, 64, 64, 232)
+        outline = (146, 38, 38, 255)
+        draw.rounded_rectangle(
+            [size * 0.24, size * 0.12, size * 0.76, size * 0.88],
+            radius=max(2, int(size * 0.09)),
+            fill=fill,
+            outline=outline,
+            width=max(1, int(size * 0.06)),
+        )
+        draw.ellipse(
+            [size * 0.63, size * 0.47, size * 0.71, size * 0.55],
+            fill=(255, 241, 177, 255),
+        )
+    else:
+        # Electrical panel icon on transparent canvas.
+        fill = (59, 114, 205, 235)
+        outline = (35, 81, 157, 255)
+        draw.rounded_rectangle(
+            [size * 0.14, size * 0.18, size * 0.86, size * 0.86],
+            radius=max(2, int(size * 0.1)),
+            fill=fill,
+            outline=outline,
+            width=max(1, int(size * 0.06)),
+        )
+        bolt = [
+            (size * 0.56, size * 0.24),
+            (size * 0.42, size * 0.50),
+            (size * 0.56, size * 0.50),
+            (size * 0.45, size * 0.78),
+            (size * 0.64, size * 0.46),
+            (size * 0.50, size * 0.46),
+        ]
+        draw.polygon(bolt, fill=(255, 232, 115, 255))
+
+    return np.asarray(base)
+
+
+def overlay_marker_icons(
+    image_rgb: np.ndarray,
+    *,
+    grid_h: int,
+    grid_w: int,
+    main_entry: list[int] | None,
+    electric_board: list[int] | None,
+    icon_size_px: int | None = None,
+) -> np.ndarray:
+    if image_rgb.ndim != 3 or image_rgb.shape[2] != 3 or grid_h <= 0 or grid_w <= 0:
+        return image_rgb
+
+    base = Image.fromarray(image_rgb, mode="RGB").convert("RGBA")
+    scale_x = base.width / float(grid_w)
+    scale_y = base.height / float(grid_h)
+    auto_size = max(14, min(46, int(min(scale_x, scale_y) * 1.2)))
+    icon_size = int(icon_size_px) if icon_size_px is not None else auto_size
+
+    def paste_icon(kind: str, marker: list[int] | None) -> None:
+        if marker is None or len(marker) != 2:
+            return
+        row = int(marker[0])
+        col = int(marker[1])
+        if not (0 <= row < grid_h and 0 <= col < grid_w):
+            return
+        icon = Image.fromarray(_build_marker_icon(kind, icon_size), mode="RGBA")
+        center_x = int(round((col + 0.5) * scale_x))
+        center_y = int(round((row + 0.5) * scale_y))
+        left = center_x - icon.width // 2
+        top = center_y - icon.height // 2
+        base.alpha_composite(icon, (left, top))
+
+    paste_icon("main_entry", main_entry)
+    paste_icon("electric_board", electric_board)
+    return np.asarray(base.convert("RGB"))
+
+
+def marker_legend_icon(kind: str, *, size: int = 22) -> np.ndarray:
+    return _build_marker_icon(kind, size)
+
+
+def marker_legend_icon_row_html(kind: str, label: str, *, size: int = 18) -> str:
+    icon_rgba = _build_marker_icon(kind, size)
+    icon = Image.fromarray(icon_rgba, mode="RGBA")
+    buffer = io.BytesIO()
+    icon.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return (
+        '<div style="display:flex;align-items:center;gap:6px;margin:0.35em 0">'
+        f'<img src="data:image/png;base64,{encoded}" '
+        'style="min-width:18px;width:18px;height:18px;flex-shrink:0;'
+        'border:1px solid #999;border-radius:3px;background:#fff;object-fit:contain"/>'
+        f'<span style="font-size:13px;line-height:1.35">{label}</span></div>'
+    )
 
 
 def render_interactive_review(

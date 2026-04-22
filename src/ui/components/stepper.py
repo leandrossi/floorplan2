@@ -4,22 +4,23 @@ import streamlit as st
 
 from application.navigation import SCREEN_ORDER
 from domain.enums import WizardScreen
+from ui.theme import tokens
 
 
 def render_stepper(current_screen: WizardScreen) -> None:
-    css = """
+    css = f"""
     <style>
-    .wizard-stepper{display:flex;align-items:center;justify-content:center;gap:0;margin:0.2rem 0 1.2rem}
-    .wizard-step{display:flex;align-items:center;gap:0}
-    .wizard-circle{width:34px;height:34px;border-radius:999px;display:flex;align-items:center;justify-content:center;
-      font-weight:700;font-size:14px;border:2px solid #cbd5e1;color:#94a3b8;background:#fff;flex-shrink:0}
-    .wizard-circle.active{border-color:#1e3a8a;color:#fff;background:#1e3a8a}
-    .wizard-circle.done{border-color:#2e7d32;color:#fff;background:#2e7d32}
-    .wizard-label{margin-left:8px;font-size:13px;color:#64748b;white-space:nowrap}
-    .wizard-label.active{color:#1e3a8a;font-weight:600}
-    .wizard-label.done{color:#2e7d32;font-weight:600}
-    .wizard-line{width:30px;height:2px;background:#dbe4f0;margin:0 10px;flex-shrink:0}
-    .wizard-line.done{background:#2e7d32}
+    .wizard-stepper{{display:flex;align-items:center;justify-content:center;gap:0;margin:0.2rem 0 {tokens.SPACE_LG}}}
+    .wizard-step{{display:flex;align-items:center;gap:0}}
+    .wizard-circle{{width:34px;height:34px;border-radius:999px;display:flex;align-items:center;justify-content:center;
+      font-weight:{tokens.FONT_WEIGHT_BOLD};font-size:14px;border:2px solid #cbd5e1;color:#94a3b8;background:#fff;flex-shrink:0}}
+    .wizard-circle.active{{border-color:{tokens.PRIMARY};color:#fff;background:{tokens.PRIMARY}}}
+    .wizard-circle.done{{border-color:{tokens.SUCCESS};color:#fff;background:{tokens.SUCCESS}}}
+    .wizard-label{{margin-left:8px;font-size:{tokens.FONT_SIZE_LABEL};color:{tokens.MUTED};white-space:nowrap}}
+    .wizard-label.active{{color:{tokens.PRIMARY};font-weight:{tokens.FONT_WEIGHT_SEMIBOLD}}}
+    .wizard-label.done{{color:{tokens.SUCCESS};font-weight:{tokens.FONT_WEIGHT_SEMIBOLD}}}
+    .wizard-line{{width:30px;height:2px;background:#dbe4f0;margin:0 10px;flex-shrink:0}}
+    .wizard-line.done{{background:{tokens.SUCCESS}}}
     </style>
     """
     parts = [css, '<div class="wizard-stepper">']

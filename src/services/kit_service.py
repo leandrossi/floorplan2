@@ -39,6 +39,6 @@ class KitService:
         return KitViewModel(
             items=items,
             hero_summary=hero_summary,
-            cta_payload={"primary": "Continuar al resumen", "secondary": "Volver a la solución"},
+            cta_payload={"primary": "Empezar otro plano", "secondary": "Volver a la solución"},
             level_label=level.label,
         )

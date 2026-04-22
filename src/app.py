@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import streamlit as st
 
+from application.navigation import SCREEN_ORDER
 from application.wizard_controller import WizardController
 from domain.enums import WizardScreen
 from ui.components.stepper import render_stepper
-from ui.screens import intro, kit, processing, proposal, review, risk, summary, upload
+from ui.screens import intro, kit, processing, proposal, review, risk, upload
 from ui.theme.styles import inject_app_styles
 
 
@@ -19,7 +20,16 @@ def main() -> None:
 
     controller = WizardController()
     state = controller.state()
-    current_screen = WizardScreen(state.current_screen)
+    try:
+        current_screen = WizardScreen(state.current_screen)
+    except ValueError:
+        controller.go_to(WizardScreen.KIT)
+        st.rerun()
+        return
+    if current_screen not in SCREEN_ORDER:
+        controller.go_to(WizardScreen.KIT)
+        st.rerun()
+        return
 
     st.caption("Asesor visual para protección domiciliaria")
     render_stepper(current_screen)
@@ -32,7 +42,6 @@ def main() -> None:
         WizardScreen.RISK: risk.render,
         WizardScreen.PROPOSAL: proposal.render,
         WizardScreen.KIT: kit.render,
-        WizardScreen.SUMMARY: summary.render,
     }
     dispatch[current_screen](controller)
 

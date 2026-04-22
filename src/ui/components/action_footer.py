@@ -10,7 +10,7 @@ def render_action_footer(
     next_disabled: bool = False,
     back_disabled: bool = False,
 ) -> tuple[bool, bool]:
-    cols = st.columns([1, 1])
+    cols = st.columns([1, 1], gap="small")
     back_clicked = False
     next_clicked = False
     with cols[0]:

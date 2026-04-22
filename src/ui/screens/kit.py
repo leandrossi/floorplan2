@@ -32,11 +32,11 @@ def render(controller) -> None:
         )
         back_clicked, next_clicked = render_action_footer(
             back_label="Volver a la solución",
-            next_label="Ir al resumen",
+            next_label="Empezar otro plano",
         )
         if back_clicked:
             controller.go_to(WizardScreen.PROPOSAL)
             st.rerun()
         if next_clicked:
-            controller.go_to(WizardScreen.SUMMARY)
+            controller.reset_all()
             st.rerun()

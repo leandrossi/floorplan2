@@ -1,12 +1,42 @@
 from __future__ import annotations
 
+# Core palette
 SURFACE = "#FFFFFF"
+SURFACE_ALT = "#F8FAFC"
 BACKGROUND = "#F4F7FB"
 TEXT = "#142033"
 MUTED = "#64748B"
 PRIMARY = "#1E3A8A"
+PRIMARY_HOVER = "#1B357D"
+PRIMARY_SOFT = "#DBE7FF"
 SUCCESS = "#2E7D32"
 WARNING = "#C98A00"
 DANGER = "#C62828"
 BORDER = "#D9E2F1"
+
+# Typography
+FONT_SIZE_BODY = "0.95rem"
+FONT_SIZE_LABEL = "0.84rem"
+FONT_SIZE_SUBTITLE = "1rem"
+FONT_SIZE_TITLE = "1.9rem"
+FONT_WEIGHT_SEMIBOLD = "600"
+FONT_WEIGHT_BOLD = "700"
+
+# Spacing scale
+SPACE_XS = "0.35rem"
+SPACE_SM = "0.65rem"
+SPACE_MD = "1rem"
+SPACE_LG = "1.25rem"
+SPACE_XL = "1.75rem"
+
+# Radius and shadows
+RADIUS_SM = "10px"
+RADIUS_MD = "14px"
 RADIUS = "18px"
+SHADOW_CARD = "0 10px 30px rgba(15, 23, 42, 0.06)"
+SHADOW_CARD_HOVER = "0 12px 32px rgba(15, 23, 42, 0.11)"
+
+# Interactive state tokens
+FOCUS_RING = "0 0 0 3px rgba(30, 58, 138, 0.22)"
+DISABLED_BG = "#E2E8F0"
+DISABLED_TEXT = "#94A3B8"

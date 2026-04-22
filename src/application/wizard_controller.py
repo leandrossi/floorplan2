@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from PIL import Image
+
 from application.navigation import can_enter, previous_screen
 from application.wizard_state import (
     WizardSessionState,
@@ -22,6 +24,9 @@ from services.risk_service import RiskService
 from services.workspace_service import SessionWorkspace, WorkspaceService
 
 ProgressCallback = Callable[[float, str], None]
+MIN_RISK_RENDER_WIDTH = 1000
+MIN_PROPOSAL_RENDER_WIDTH = 1000
+PROPOSAL_OVERLAY_BASENAME = "devices_overlay_v3.png"
 
 
 class WizardController:
@@ -181,13 +186,34 @@ class WizardController:
             raise RuntimeError("Primero tenés que aprobar la revisión.")
         workspace = self._workspace(state)
         if state.risk_overlay_path and Path(state.risk_overlay_path).is_file():
+            try:
+                with Image.open(state.risk_overlay_path) as current_overlay:
+                    if current_overlay.width < MIN_RISK_RENDER_WIDTH:
+                        state.risk_overlay_path = None
+                        self.persist(state)
+                    else:
+                        return RiskViewModel(
+                            base_plan_path=str(workspace.review_dir / "risk_base_plan.png"),
+                            risk_overlay_path=state.risk_overlay_path,
+                            legend=[
+                                {"label": "Diagnóstico base", "color": "Rojo translúcido"},
+                                {"label": "Entrada principal", "color": "Rojo sólido"},
+                                {"label": "Tablero eléctrico", "color": "Azul sólido"},
+                            ],
+                            summary_text=state.risk_summary_text or "",
+                            details=[],
+                        )
+            except OSError:
+                state.risk_overlay_path = None
+                self.persist(state)
+        if state.risk_overlay_path and Path(state.risk_overlay_path).is_file():
             return RiskViewModel(
                 base_plan_path=str(workspace.review_dir / "risk_base_plan.png"),
                 risk_overlay_path=state.risk_overlay_path,
                 legend=[
                     {"label": "Diagnóstico base", "color": "Rojo translúcido"},
                     {"label": "Entrada principal", "color": "Rojo sólido"},
-                    {"label": "Cuadro eléctrico", "color": "Azul sólido"},
+                    {"label": "Tablero eléctrico", "color": "Azul sólido"},
                 ],
                 summary_text=state.risk_summary_text or "",
                 details=[],
@@ -211,13 +237,23 @@ class WizardController:
         proposal_path = state.proposal_paths_by_level.get(level.value)
         if not proposal_path:
             return None
+        overlay_path = state.overlay_paths_by_level.get(level.value)
+        if overlay_path and Path(overlay_path).is_file():
+            try:
+                if Path(overlay_path).name != PROPOSAL_OVERLAY_BASENAME:
+                    return None
+                with Image.open(overlay_path) as overlay_image:
+                    if overlay_image.width < MIN_PROPOSAL_RENDER_WIDTH:
+                        return None
+            except OSError:
+                return None
         devices = []
         if Path(proposal_path).is_file():
             devices = list((self.artifact_store.read_json(Path(proposal_path)).get("devices") or []))
         return ProposalViewModel(
             security_level=level.planner_code,
             devices=devices,
-            overlay_path=state.overlay_paths_by_level.get(level.value),
+            overlay_path=overlay_path,
             counts_by_type=state.proposal_counts_by_level.get(level.value, {}),
             proposal_summary=state.proposal_summaries_by_level.get(level.value, ""),
             proposal_path=proposal_path,

@@ -11,7 +11,6 @@ class WizardScreen(str, Enum):
     RISK = "risk"
     PROPOSAL = "proposal"
     KIT = "kit"
-    SUMMARY = "summary"
 
     @property
     def label(self) -> str:
@@ -23,7 +22,6 @@ class WizardScreen(str, Enum):
             WizardScreen.RISK: "Diagnóstico",
             WizardScreen.PROPOSAL: "Solución",
             WizardScreen.KIT: "Kit",
-            WizardScreen.SUMMARY: "Resumen",
         }[self]
 
 

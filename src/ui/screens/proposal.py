@@ -10,6 +10,7 @@ from ui.components.action_footer import render_action_footer
 from ui.components.plan_canvas import show_image_path
 from ui.components.security_level_selector import render_security_level_selector
 from ui.components.side_panel import render_side_panel
+from ui_components import get_device_icon_image
 
 
 def render(controller) -> None:
@@ -28,6 +29,30 @@ def render(controller) -> None:
             st.rerun()
 
     with canvas_col:
+        st.markdown(
+            """
+            <style>
+            .proposal-device-item {
+                padding: 4px 2px 0 2px;
+                text-align: center;
+            }
+            .proposal-device-label {
+                margin: 0.32rem 0 0.18rem 0;
+                color: #475467;
+                font-size: 0.82rem;
+                line-height: 1.2;
+            }
+            .proposal-device-value {
+                margin: 0;
+                color: #0F172A;
+                font-size: 1.75rem;
+                font-weight: 700;
+                line-height: 1;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown(
             """
             <div class="wizard-card">
@@ -62,7 +87,16 @@ def render(controller) -> None:
         stats = st.columns(max(1, len(proposal_view.counts_by_type)))
         for idx, (device_type, count) in enumerate(sorted(proposal_view.counts_by_type.items())):
             with stats[idx % len(stats)]:
-                st.metric(device_type.replace("_", " ").title(), int(count))
+                st.markdown('<div class="proposal-device-item">', unsafe_allow_html=True)
+                icon = get_device_icon_image(device_type, size=44)
+                if icon is not None:
+                    st.image(icon, width=48)
+                st.markdown(
+                    f'<p class="proposal-device-label">{device_type.replace("_", " ").title()}</p>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(f'<p class="proposal-device-value">{int(count)}</p>', unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
         st.caption(proposal_view.proposal_summary)
 

@@ -11,14 +11,16 @@ SCREEN_ORDER: tuple[WizardScreen, ...] = (
     WizardScreen.RISK,
     WizardScreen.PROPOSAL,
     WizardScreen.KIT,
-    WizardScreen.SUMMARY,
 )
 
 
 def get_screen(screen_name: str | WizardScreen) -> WizardScreen:
     if isinstance(screen_name, WizardScreen):
         return screen_name
-    return WizardScreen(str(screen_name))
+    try:
+        return WizardScreen(str(screen_name))
+    except ValueError:
+        return WizardScreen.KIT
 
 
 def next_screen(screen_name: str | WizardScreen) -> WizardScreen:
@@ -49,8 +51,6 @@ def can_enter(screen_name: str | WizardScreen, state: WizardSessionState) -> boo
         return bool(state.review_approved_path and state.risk_overlay_path)
     if screen is WizardScreen.KIT:
         return bool(state.proposal_paths_by_level.get(state.proposal_level))
-    if screen is WizardScreen.SUMMARY:
-        return bool(state.kit_by_level.get(state.proposal_level))
     return False
 
 

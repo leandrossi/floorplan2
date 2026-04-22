@@ -11,13 +11,14 @@ from typing import Any
 
 import numpy as np
 import streamlit as st
+from PIL import Image, ImageDraw
 
 STRUCT_RGB: dict[int, tuple[int, int, int]] = {
-    0: (200, 200, 255),  # exterior
-    1: (40, 40, 40),     # wall
-    2: (0, 180, 255),    # window
-    3: (0, 100, 0),      # door
-    4: (255, 220, 180),  # interior
+    0: (217, 214, 243),  # exterior (lavender / cool gray)
+    1: (63, 70, 82),     # wall
+    2: (143, 211, 255),  # window
+    3: (185, 137, 90),   # door
+    4: (243, 245, 247),  # interior
 }
 
 DEVICE_STYLE: dict[str, dict[str, object]] = {
@@ -27,6 +28,20 @@ DEVICE_STYLE: dict[str, dict[str, object]] = {
     "pir":           {"code": 13, "rgb": (255, 87, 34),   "label": "PIR", "name": "PIR"},
     "siren_indoor":  {"code": 14, "rgb": (156, 39, 176),  "label": "SI",  "name": "Sirena Int."},
     "siren_outdoor": {"code": 15, "rgb": (33, 150, 243),  "label": "SO",  "name": "Sirena Ext."},
+}
+
+ICON_ROOT = Path(__file__).resolve().parents[1] / "assets" / "icons"
+MARKER_ICON_PATHS: dict[str, Path] = {
+    "main_entry": ICON_ROOT / "main-entry-door.png",
+    "electric_board": ICON_ROOT / "electric-panel.png",
+}
+DEVICE_ICON_PATHS: dict[str, Path] = {
+    "panel": ICON_ROOT / "panel.png",
+    "keyboard": ICON_ROOT / "keyboard.png",
+    "magnetic": ICON_ROOT / "magnetic.png",
+    "pir": ICON_ROOT / "pir.png",
+    "siren_indoor": ICON_ROOT / "siren-indoor.png",
+    "siren_outdoor": ICON_ROOT / "siren-outdoor.png",
 }
 
 # Cell radius for proposal device squares (radius 2 → 5×5 cells), aligned with
@@ -137,6 +152,154 @@ def draw_square(
     img[r0 : r1 + 1, c0 : c1 + 1] = np.array(color, dtype=np.uint8)
 
 
+def _load_icon_rgba(path: Path, size: int) -> np.ndarray | None:
+    if not path.is_file():
+        return None
+    try:
+        with Image.open(path) as icon_image:
+            rgba = icon_image.convert("RGBA")
+            alpha = rgba.split()[3]
+            bbox = alpha.getbbox()
+            if bbox is not None:
+                rgba = rgba.crop(bbox)
+            resized = rgba.resize((size, size), Image.LANCZOS)
+            return np.asarray(resized)
+    except Exception:
+        return None
+
+
+def _paste_icon_at_cell(
+    canvas: Image.Image,
+    icon_rgba: np.ndarray,
+    *,
+    row: int,
+    col: int,
+    grid_h: int,
+    grid_w: int,
+    offset_px: tuple[int, int] = (0, 0),
+    draw_halo: bool = False,
+) -> None:
+    if not (0 <= row < grid_h and 0 <= col < grid_w):
+        return
+    scale_x = canvas.width / float(grid_w)
+    scale_y = canvas.height / float(grid_h)
+    center_x = int(round((col + 0.5) * scale_x)) + int(offset_px[0])
+    center_y = int(round((row + 0.5) * scale_y)) + int(offset_px[1])
+    icon = Image.fromarray(icon_rgba, mode="RGBA")
+    left = center_x - icon.width // 2
+    top = center_y - icon.height // 2
+    # Keep icon fully visible even when collision-offset pushes it to borders.
+    left = max(0, min(left, canvas.width - icon.width))
+    top = max(0, min(top, canvas.height - icon.height))
+    if draw_halo:
+        draw = ImageDraw.Draw(canvas, mode="RGBA")
+        halo_radius = max(icon.width, icon.height) // 2 + 3
+        draw.ellipse(
+            (
+                center_x - halo_radius,
+                center_y - halo_radius,
+                center_x + halo_radius,
+                center_y + halo_radius,
+            ),
+            fill=(255, 255, 255, 148),
+        )
+    canvas.alpha_composite(icon, (left, top))
+
+
+def overlay_marker_icons(
+    rgb: np.ndarray,
+    *,
+    grid_h: int,
+    grid_w: int,
+    main_entry: list[int] | None,
+    electric_board: list[int] | None,
+    icon_size_px: int = 20,
+) -> np.ndarray:
+    out = Image.fromarray(rgb.astype(np.uint8), mode="RGB").convert("RGBA")
+    if main_entry is not None and len(main_entry) == 2:
+        icon = _load_icon_rgba(MARKER_ICON_PATHS["main_entry"], icon_size_px)
+        if icon is not None:
+            _paste_icon_at_cell(
+                out,
+                icon,
+                row=int(main_entry[0]),
+                col=int(main_entry[1]),
+                grid_h=grid_h,
+                grid_w=grid_w,
+            )
+    if electric_board is not None and len(electric_board) == 2:
+        icon = _load_icon_rgba(MARKER_ICON_PATHS["electric_board"], icon_size_px)
+        if icon is not None:
+            _paste_icon_at_cell(
+                out,
+                icon,
+                row=int(electric_board[0]),
+                col=int(electric_board[1]),
+                grid_h=grid_h,
+                grid_w=grid_w,
+            )
+    return np.asarray(out.convert("RGB"))
+
+
+def overlay_device_icons(
+    rgb: np.ndarray,
+    *,
+    grid_h: int,
+    grid_w: int,
+    devices: list[dict[str, Any]],
+    icon_size_px: int = 20,
+    reserved_cells: set[tuple[int, int]] | None = None,
+) -> tuple[np.ndarray, dict[str, int]]:
+    out = Image.fromarray(rgb.astype(np.uint8), mode="RGB").convert("RGBA")
+    counts: dict[str, int] = {}
+    used_per_cell: dict[tuple[int, int], int] = {}
+    for reserved in reserved_cells or set():
+        used_per_cell[reserved] = max(used_per_cell.get(reserved, 0), 1)
+
+    spread = max(6, int(icon_size_px * 0.8))
+    offset_slots = [
+        (0, 0),
+        (spread, 0),
+        (-spread, 0),
+        (0, spread),
+        (0, -spread),
+        (spread, spread),
+        (-spread, spread),
+        (spread, -spread),
+        (-spread, -spread),
+    ]
+
+    for device in devices:
+        device_type = str(device.get("device_type") or "").lower()
+        cell = device.get("cell") or []
+        if device_type not in DEVICE_ICON_PATHS or not isinstance(cell, (list, tuple)) or len(cell) != 2:
+            continue
+        row, col = int(cell[0]), int(cell[1])
+        icon = _load_icon_rgba(DEVICE_ICON_PATHS[device_type], icon_size_px)
+        if icon is None:
+            continue
+        cell_key = (row, col)
+        slot_idx = used_per_cell.get(cell_key, 0)
+        used_per_cell[cell_key] = slot_idx + 1
+        offset = offset_slots[slot_idx % len(offset_slots)]
+        _paste_icon_at_cell(
+            out,
+            icon,
+            row=row,
+            col=col,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            offset_px=offset,
+            draw_halo=True,
+        )
+        counts[device_type] = counts.get(device_type, 0) + 1
+    return np.asarray(out.convert("RGB")), counts
+
+
+def get_device_icon_image(device_type: str, *, size: int = 20) -> np.ndarray | None:
+    return _load_icon_rgba(DEVICE_ICON_PATHS.get(str(device_type).lower(), Path()), size)
+
+
 def upscale_rgb(rgb: np.ndarray, target_w: int) -> np.ndarray:
     """Nearest-neighbour upscale to *target_w* keeping aspect ratio.
 
@@ -218,6 +381,8 @@ def render_proposal_views(
     show_red_zones: bool,
     show_devices: bool,
     replace_base_with_devices: bool,
+    main_entry: list[int] | None = None,
+    electric_board: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, int], int]:
     red_img = rgb_from_struct(eff)
     dev_img = rgb_from_struct(eff)
@@ -247,47 +412,23 @@ def render_proposal_views(
             red_img = alpha_blend(red_img, red_mask, (220, 20, 60), alpha=0.42)
 
     if show_devices:
-        if replace_base_with_devices:
-            repl = eff.copy()
-            for d in devices:
-                dt = str(d.get("device_type") or "").lower()
-                style = DEVICE_STYLE.get(dt)
-                cell = d.get("cell") or []
-                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
-                    continue
-                r, c = int(cell[0]), int(cell[1])
-                if 0 <= r < h and 0 <= c < w:
-                    repl[r, c] = int(style["code"])  # type: ignore[index]
-                    device_counts[dt] = device_counts.get(dt, 0) + 1
-            dev_img = rgb_from_struct(repl)
-            for dt, style in DEVICE_STYLE.items():
-                code = int(style["code"])  # type: ignore[index]
-                rgb_val = style["rgb"]
-                dev_img[repl == code] = np.array(rgb_val, dtype=np.uint8)
-            for d in devices:
-                dt = str(d.get("device_type") or "").lower()
-                style = DEVICE_STYLE.get(dt)
-                cell = d.get("cell") or []
-                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
-                    continue
-                r, c = int(cell[0]), int(cell[1])
-                if 0 <= r < h and 0 <= c < w:
-                    draw_square(
-                        dev_img, r, c, style["rgb"], radius=DEVICE_DRAW_RADIUS  # type: ignore[index]
-                    )
-        else:
-            for d in devices:
-                dt = str(d.get("device_type") or "").lower()
-                style = DEVICE_STYLE.get(dt)
-                cell = d.get("cell") or []
-                if style is None or not isinstance(cell, (list, tuple)) or len(cell) != 2:
-                    continue
-                r, c = int(cell[0]), int(cell[1])
-                if 0 <= r < h and 0 <= c < w:
-                    draw_square(
-                        dev_img, r, c, style["rgb"], radius=DEVICE_DRAW_RADIUS  # type: ignore[index]
-                    )
-                    device_counts[dt] = device_counts.get(dt, 0) + 1
+        dev_img, device_counts = overlay_device_icons(
+            dev_img,
+            grid_h=h,
+            grid_w=w,
+            devices=[d for d in devices if isinstance(d, dict)],
+            icon_size_px=20,
+        )
+
+    if main_entry is not None or electric_board is not None:
+        dev_img = overlay_marker_icons(
+            dev_img,
+            grid_h=h,
+            grid_w=w,
+            main_entry=main_entry,
+            electric_board=electric_board,
+            icon_size_px=20,
+        )
 
     return red_img, dev_img, device_counts, red_cells_count
 
