@@ -6,6 +6,8 @@ from application.navigation import SCREEN_ORDER
 from domain.enums import WizardScreen
 from ui.theme import tokens
 
+STEPPER_ORDER = tuple(screen for screen in SCREEN_ORDER if screen is not WizardScreen.INTRO)
+
 
 def render_stepper(current_screen: WizardScreen) -> None:
     css = f"""
@@ -24,8 +26,8 @@ def render_stepper(current_screen: WizardScreen) -> None:
     </style>
     """
     parts = [css, '<div class="wizard-stepper">']
-    current_index = SCREEN_ORDER.index(current_screen)
-    for idx, screen in enumerate(SCREEN_ORDER):
+    current_index = STEPPER_ORDER.index(current_screen)
+    for idx, screen in enumerate(STEPPER_ORDER):
         if idx < current_index:
             circle_cls = "done"
             label_cls = "done"
@@ -40,7 +42,7 @@ def render_stepper(current_screen: WizardScreen) -> None:
             circle_content = str(idx + 1)
         parts.append(f'<div class="wizard-step"><div class="wizard-circle {circle_cls}">{circle_content}</div>')
         parts.append(f'<span class="wizard-label {label_cls}">{screen.label}</span></div>')
-        if idx < len(SCREEN_ORDER) - 1:
+        if idx < len(STEPPER_ORDER) - 1:
             parts.append(f'<div class="wizard-line {"done" if idx < current_index else ""}"></div>')
     parts.append("</div>")
     st.markdown("".join(parts), unsafe_allow_html=True)

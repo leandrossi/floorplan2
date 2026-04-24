@@ -14,6 +14,7 @@ def inject_app_styles() -> None:
         .stApp {{
             background: {tokens.BACKGROUND};
             color: {tokens.TEXT};
+            font-family: "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
         }}
         .block-container {{
             padding-top: {tokens.SPACE_LG};
@@ -41,6 +42,7 @@ def inject_app_styles() -> None:
             font-size: {tokens.FONT_SIZE_BODY};
         }}
         .wizard-title {{
+            font-family: "SF Pro Display", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
             font-size: {tokens.FONT_SIZE_TITLE};
             line-height: 1.15;
             margin: 0 0 {tokens.SPACE_SM} 0;

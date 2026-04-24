@@ -31,8 +31,9 @@ def main() -> None:
         st.rerun()
         return
 
-    st.caption("Asesor visual para protección domiciliaria")
-    render_stepper(current_screen)
+    if current_screen is not WizardScreen.INTRO:
+        st.caption("Asesor visual para protección domiciliaria")
+        render_stepper(current_screen)
 
     dispatch = {
         WizardScreen.INTRO: intro.render,
