@@ -45,20 +45,19 @@ DEVICE_ICON_PATHS: dict[str, Path] = {
 }
 
 # Cell radius for proposal device squares (radius 2 → 5×5 cells), aligned with
-# ``overlay_markers(..., marker_radius=2)`` for puerta principal / tablero.
+# ``overlay_markers(..., marker_radius=2)`` for front door / electrical board.
 DEVICE_DRAW_RADIUS: int = 2
 
 # Wizard: validation highlight on struct preview (row, col cells).
 VALIDATION_ERROR_OVERLAY_RGB: tuple[int, int, int] = (255, 0, 180)
 VALIDATION_WARNING_SHORT_FREE_RGB: tuple[int, int, int] = (255, 165, 0)
-# Muro en cara larga: la celda suele ser struct=1 (gris oscuro); color muy distinto.
+# Long-side wall warning: the cell is usually struct=1 (dark gray), so use a distinct color.
 VALIDATION_WARNING_LONG_WALL_RGB: tuple[int, int, int] = (0, 255, 220)
 
-# Leyenda paso 2 (textos en español).
 WIZARD_VALIDATION_LEGEND_ROWS: tuple[tuple[tuple[int, int, int], str], ...] = (
-    (VALIDATION_WARNING_SHORT_FREE_RGB, "Advertencia · exterior/interior en cara corta de apertura"),
-    (VALIDATION_WARNING_LONG_WALL_RGB, "Advertencia · muro en cara larga de ventana o puerta"),
-    (VALIDATION_ERROR_OVERLAY_RGB, "Error · topología o marcadores (bloquea propuesta)"),
+    (VALIDATION_WARNING_SHORT_FREE_RGB, "Check opening edge"),
+    (VALIDATION_WARNING_LONG_WALL_RGB, "Check nearby wall"),
+    (VALIDATION_ERROR_OVERLAY_RGB, "Must fix before continuing"),
 )
 
 
@@ -166,6 +165,47 @@ def _load_icon_rgba(path: Path, size: int) -> np.ndarray | None:
             return np.asarray(resized)
     except Exception:
         return None
+
+
+def apply_highlight_ring_to_rgb(
+    rgb: np.ndarray,
+    *,
+    grid_h: int,
+    grid_w: int,
+    row: int | None = None,
+    col: int | None = None,
+    pixel_center: tuple[int, int] | None = None,
+    color: tuple[int, int, int] = (220, 38, 38),
+    ring_fraction: float = 0.4,
+) -> np.ndarray:
+    """Draw a circular highlight ring around a cell center or explicit pixel center."""
+    if grid_h <= 0 or grid_w <= 0:
+        return rgb
+    h_px, w_px = rgb.shape[0], rgb.shape[1]
+    scale_x = w_px / float(grid_w)
+    scale_y = h_px / float(grid_h)
+    radius = max(14, int(min(scale_x, scale_y) * ring_fraction))
+
+    if pixel_center is not None:
+        cx, cy = int(pixel_center[0]), int(pixel_center[1])
+    elif row is not None and col is not None:
+        if not (0 <= row < grid_h and 0 <= col < grid_w):
+            return rgb
+        cx = int(round((col + 0.5) * scale_x))
+        cy = int(round((row + 0.5) * scale_y))
+    else:
+        return rgb
+
+    base = Image.fromarray(rgb.astype(np.uint8), mode="RGB").convert("RGBA")
+    ring_layer = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(ring_layer)
+    bbox = (cx - radius, cy - radius, cx + radius, cy + radius)
+    draw.ellipse(bbox, outline=(*color, 255), width=5)
+    inner = max(8, radius - 10)
+    bbox2 = (cx - inner, cy - inner, cx + inner, cy + inner)
+    draw.ellipse(bbox2, outline=(*color, 140), width=3)
+    combined = Image.alpha_composite(base, ring_layer)
+    return np.asarray(combined.convert("RGB"))
 
 
 def _paste_icon_at_cell(
@@ -294,6 +334,77 @@ def overlay_device_icons(
         )
         counts[device_type] = counts.get(device_type, 0) + 1
     return np.asarray(out.convert("RGB")), counts
+
+
+def proposal_device_icon_pixel_center(
+    devices: list[dict[str, Any]],
+    device_index: int,
+    *,
+    grid_h: int,
+    grid_w: int,
+    image_h: int,
+    image_w: int,
+    reserved_cells: set[tuple[int, int]] | None = None,
+    icon_size_px: int = 24,
+) -> tuple[int, int] | None:
+    """Pixel center of the device icon as drawn by overlay_device_icons (offsets + collisions)."""
+    if device_index < 0 or device_index >= len(devices):
+        return None
+
+    used_per_cell: dict[tuple[int, int], int] = {}
+    for reserved in reserved_cells or set():
+        used_per_cell[reserved] = max(used_per_cell.get(reserved, 0), 1)
+
+    spread = max(6, int(icon_size_px * 0.8))
+    offset_slots = [
+        (0, 0),
+        (spread, 0),
+        (-spread, 0),
+        (0, spread),
+        (0, -spread),
+        (spread, spread),
+        (-spread, spread),
+        (spread, -spread),
+        (-spread, -spread),
+    ]
+
+    def _cell_center_pixels(r: int, c: int) -> tuple[int, int]:
+        sx = image_w / float(grid_w)
+        sy = image_h / float(grid_h)
+        return (int(round((c + 0.5) * sx)), int(round((r + 0.5) * sy)))
+
+    for idx, device in enumerate(devices):
+        device_type = str(device.get("device_type") or "").lower()
+        cell = device.get("cell") or []
+        if device_type not in DEVICE_ICON_PATHS or not isinstance(cell, (list, tuple)) or len(cell) != 2:
+            if idx == device_index:
+                raw = devices[device_index].get("cell")
+                if isinstance(raw, (list, tuple)) and len(raw) == 2:
+                    return _cell_center_pixels(int(raw[0]), int(raw[1]))
+                return None
+            continue
+        row, col = int(cell[0]), int(cell[1])
+        icon = _load_icon_rgba(DEVICE_ICON_PATHS[device_type], icon_size_px)
+        if icon is None:
+            if idx == device_index:
+                return _cell_center_pixels(row, col)
+            continue
+        cell_key = (row, col)
+        slot_idx = used_per_cell.get(cell_key, 0)
+        used_per_cell[cell_key] = slot_idx + 1
+        offset = offset_slots[slot_idx % len(offset_slots)]
+
+        if idx == device_index:
+            sx = image_w / float(grid_w)
+            sy = image_h / float(grid_h)
+            cx = int(round((col + 0.5) * sx)) + int(offset[0])
+            cy = int(round((row + 0.5) * sy)) + int(offset[1])
+            return (cx, cy)
+
+    raw_cell = devices[device_index].get("cell")
+    if isinstance(raw_cell, (list, tuple)) and len(raw_cell) == 2:
+        return _cell_center_pixels(int(raw_cell[0]), int(raw_cell[1]))
+    return None
 
 
 def get_device_icon_image(device_type: str, *, size: int = 20) -> np.ndarray | None:

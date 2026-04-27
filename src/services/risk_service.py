@@ -68,7 +68,7 @@ class RiskService:
         bundle = self.adapter.load(review_bundle_path)
         approved = load_approved(review_approved_path)
         if approved is None:
-            raise RuntimeError("Falta la revisión aprobada para construir el diagnóstico.")
+            raise RuntimeError("Approved review is required to build the diagnosis.")
 
         effective_struct = apply_struct_patches(bundle.struct, approved.get("struct_patch") or [])
         main_entry = approved.get("main_entry")
@@ -114,32 +114,32 @@ class RiskService:
 
         if red_cells > 0:
             summary = (
-                "Detectamos las áreas más expuestas según accesos y circulación dentro de la vivienda. "
-                "Este diagnóstico base queda definido y en el siguiente paso te mostramos distintas formas de cubrirlo."
+                "We identified the most exposed areas based on access routes and circulation inside the home. "
+                "This baseline diagnosis is set—next, we'll show you different ways to cover these zones."
             )
             details = [
-                "Zonas más expuestas detectadas.",
-                "Entrada principal incluida en el análisis.",
-                "Diagnóstico listo para definir cobertura.",
+                "Most exposed zones detected.",
+                "Main entrance included in the analysis.",
+                "Diagnosis ready for coverage planning.",
             ]
         else:
             summary = (
-                "No detectamos zonas de alta exposición persistentes en esta vista base. "
-                "Igual te mostramos una solución recomendada para cubrir accesos y circulación."
+                "We didn't find persistent high-exposure zones in this baseline view. "
+                "We'll still show you a recommended solution for access and circulation."
             )
             details = [
-                "No se detectaron zonas críticas persistentes.",
-                "Entrada principal incluida en el análisis.",
-                "Diagnóstico listo para definir cobertura.",
+                "No persistent critical zones detected.",
+                "Main entrance included in the analysis.",
+                "Diagnosis ready for coverage planning.",
             ]
 
         return RiskViewModel(
             base_plan_path=str(base_plan_path),
             risk_overlay_path=str(risk_overlay_path),
             legend=[
-                {"label": "Diagnóstico base", "color": "Rojo translúcido"},
-                {"label": "Entrada principal", "color": "Rojo sólido"},
-                {"label": "Tablero eléctrico", "color": "Azul sólido"},
+                {"label": "Baseline diagnosis", "color": "Translucent red"},
+                {"label": "Main entrance", "color": "Solid red"},
+                {"label": "Electrical board", "color": "Solid blue"},
             ],
             summary_text=summary,
             details=details,

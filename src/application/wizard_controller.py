@@ -72,6 +72,8 @@ class WizardController:
     def back(self) -> WizardSessionState:
         state = self.state()
         prev_screen = previous_screen(state.current_screen)
+        while prev_screen is WizardScreen.PROCESSING:
+            prev_screen = previous_screen(prev_screen)
         if can_enter(prev_screen, state):
             state.current_screen = prev_screen.value
         return self.persist(state)
@@ -129,7 +131,7 @@ class WizardController:
             state.current_screen = WizardScreen.UPLOAD.value
         return self.persist(state)
 
-    def get_review_validation(self) -> dict:
+    def get_review_validation(self, *, require_markers: bool = True) -> dict:
         state = self.state()
         if not state.review_bundle_path:
             raise RuntimeError("No hay datos de revisión cargados.")
@@ -138,6 +140,7 @@ class WizardController:
             struct_patch=state.struct_patch,
             main_entry=state.main_entry,
             electric_board=state.electric_board,
+            require_markers=require_markers,
         )
 
     def update_review_draft(
@@ -196,9 +199,9 @@ class WizardController:
                             base_plan_path=str(workspace.review_dir / "risk_base_plan.png"),
                             risk_overlay_path=state.risk_overlay_path,
                             legend=[
-                                {"label": "Diagnóstico base", "color": "Rojo translúcido"},
-                                {"label": "Entrada principal", "color": "Rojo sólido"},
-                                {"label": "Tablero eléctrico", "color": "Azul sólido"},
+                                {"label": "Baseline diagnosis", "color": "Translucent red"},
+                                {"label": "Main entrance", "color": "Solid red"},
+                                {"label": "Electrical board", "color": "Solid blue"},
                             ],
                             summary_text=state.risk_summary_text or "",
                             details=[],
@@ -211,9 +214,9 @@ class WizardController:
                 base_plan_path=str(workspace.review_dir / "risk_base_plan.png"),
                 risk_overlay_path=state.risk_overlay_path,
                 legend=[
-                    {"label": "Diagnóstico base", "color": "Rojo translúcido"},
-                    {"label": "Entrada principal", "color": "Rojo sólido"},
-                    {"label": "Tablero eléctrico", "color": "Azul sólido"},
+                    {"label": "Baseline diagnosis", "color": "Translucent red"},
+                    {"label": "Main entrance", "color": "Solid red"},
+                    {"label": "Electrical board", "color": "Solid blue"},
                 ],
                 summary_text=state.risk_summary_text or "",
                 details=[],
@@ -247,9 +250,17 @@ class WizardController:
                         return None
             except OSError:
                 return None
-        devices = []
+        devices: list = []
         if Path(proposal_path).is_file():
             devices = list((self.artifact_store.read_json(Path(proposal_path)).get("devices") or []))
+        if state.review_bundle_path and state.review_approved_path and devices:
+            devices, grid_h, grid_w = self.proposal_service.resolve_devices_for_overlay(
+                review_bundle_path=Path(state.review_bundle_path),
+                review_approved_path=Path(state.review_approved_path),
+                proposal_devices=devices,
+            )
+        else:
+            grid_h, grid_w = 0, 0
         return ProposalViewModel(
             security_level=level.planner_code,
             devices=devices,
@@ -258,6 +269,8 @@ class WizardController:
             proposal_summary=state.proposal_summaries_by_level.get(level.value, ""),
             proposal_path=proposal_path,
             report_path=state.report_paths_by_level.get(level.value),
+            grid_h=grid_h,
+            grid_w=grid_w,
         )
 
     def ensure_proposal_view(self, progress_cb: ProgressCallback | None = None) -> ProposalViewModel:

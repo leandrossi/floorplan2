@@ -8,6 +8,7 @@ class WizardScreen(str, Enum):
     UPLOAD = "upload"
     PROCESSING = "processing"
     REVIEW = "review"
+    REVIEW_MARKERS = "review_markers"
     RISK = "risk"
     PROPOSAL = "proposal"
     KIT = "kit"
@@ -15,12 +16,13 @@ class WizardScreen(str, Enum):
     @property
     def label(self) -> str:
         return {
-            WizardScreen.INTRO: "Inicio",
-            WizardScreen.UPLOAD: "Plano",
-            WizardScreen.PROCESSING: "Análisis",
-            WizardScreen.REVIEW: "Revisión",
-            WizardScreen.RISK: "Diagnóstico",
-            WizardScreen.PROPOSAL: "Solución",
+            WizardScreen.INTRO: "Welcome",
+            WizardScreen.UPLOAD: "Floor plan",
+            WizardScreen.PROCESSING: "Analysis",
+            WizardScreen.REVIEW: "Review",
+            WizardScreen.REVIEW_MARKERS: "References",
+            WizardScreen.RISK: "Diagnosis",
+            WizardScreen.PROPOSAL: "Solution",
             WizardScreen.KIT: "Kit",
         }[self]
 
@@ -33,9 +35,9 @@ class SecurityLevel(str, Enum):
     @property
     def label(self) -> str:
         return {
-            SecurityLevel.BASIC: "Básico",
-            SecurityLevel.RECOMMENDED: "Recomendado",
-            SecurityLevel.MAXIMUM: "Máximo",
+            SecurityLevel.BASIC: "Basic",
+            SecurityLevel.RECOMMENDED: "Recommended",
+            SecurityLevel.MAXIMUM: "Maximum",
         }[self]
 
     @property

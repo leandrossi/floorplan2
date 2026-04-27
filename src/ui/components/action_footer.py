@@ -10,6 +10,7 @@ def render_action_footer(
     next_disabled: bool = False,
     back_disabled: bool = False,
 ) -> tuple[bool, bool]:
+    st.markdown('<div class="wizard-action-footer">', unsafe_allow_html=True)
     cols = st.columns([1, 1], gap="small")
     back_clicked = False
     next_clicked = False
@@ -24,4 +25,5 @@ def render_action_footer(
                 width="stretch",
                 disabled=next_disabled,
             )
+    st.markdown("</div>", unsafe_allow_html=True)
     return back_clicked, next_clicked

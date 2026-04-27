@@ -16,6 +16,9 @@ def render_side_panel(
     if callout:
         st.info(callout)
     if checklist:
-        items = "".join(f"<li>{item}</li>" for item in checklist)
-        st.markdown(f'<ul class="wizard-bullet-list">{items}</ul>', unsafe_allow_html=True)
+        items = "".join(
+            f'<div class="wizard-status-item"><span class="wizard-status-dot"></span><span>{item}</span></div>'
+            for item in checklist
+        )
+        st.markdown(f'<div class="wizard-status-list">{items}</div>', unsafe_allow_html=True)
     st.markdown("</aside>", unsafe_allow_html=True)

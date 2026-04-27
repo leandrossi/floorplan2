@@ -22,8 +22,17 @@ body.is-painting img {
 
 #image-container {
   position: relative;
-  overflow-x: auto;
+  width: 100%;
+  max-width: 100%;
+  overflow: scroll;
+  scrollbar-gutter: stable both-edges;
   cursor: crosshair !important;
+  display: block;
+}
+
+body.is-panning #image-container,
+body.is-panning img {
+  cursor: grabbing !important;
 }
 
 #coord-hint {
@@ -43,4 +52,18 @@ body.is-painting img {
 
 body.is-painting #image-container {
   cursor: grabbing !important;
+}
+
+#preview-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+#image {
+  position: relative;
+  z-index: 0;
+  display: block;
 }

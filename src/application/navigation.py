@@ -8,6 +8,7 @@ SCREEN_ORDER: tuple[WizardScreen, ...] = (
     WizardScreen.UPLOAD,
     WizardScreen.PROCESSING,
     WizardScreen.REVIEW,
+    WizardScreen.REVIEW_MARKERS,
     WizardScreen.RISK,
     WizardScreen.PROPOSAL,
     WizardScreen.KIT,
@@ -44,6 +45,8 @@ def can_enter(screen_name: str | WizardScreen, state: WizardSessionState) -> boo
     if screen is WizardScreen.PROCESSING:
         return bool(state.upload_path)
     if screen is WizardScreen.REVIEW:
+        return bool(state.review_bundle_path)
+    if screen is WizardScreen.REVIEW_MARKERS:
         return bool(state.review_bundle_path)
     if screen is WizardScreen.RISK:
         return bool(state.review_approved_path)

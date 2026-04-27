@@ -47,7 +47,7 @@ class TopologyValidationResult:
 
 @dataclass
 class ValidationCheckItem:
-    """Single row for UI checklist (Spanish label; detail matches validate_grid_for_alarm strings)."""
+    """Single row for UI checklist; detail matches validate_grid_for_alarm strings."""
 
     id: str
     label: str
@@ -85,11 +85,11 @@ def _check_r1_interior_adjacent_exterior(struct: np.ndarray, max_cells: int) -> 
     sample = tuple(bad[:max_cells])
     extra = len(bad) - len(sample) if len(bad) > max_cells else 0
     msg = (
-        "[INT_EXT_ADJ] Interior (4) no puede ser 4-vecino de exterior (0) sin muro/apertura. "
-        f"Ejemplos (fila,col): {sample}"
+        "[INT_EXT_ADJ] Indoor cells cannot touch outdoor cells directly. "
+        f"Examples (row,col): {sample}"
     )
     if extra > 0:
-        msg += f" … (+{extra} más)"
+        msg += f" … (+{extra} more)"
     return [ValidationIssue(code="INT_EXT_ADJ", message=msg, severity="error", cells=sample)]
 
 
@@ -111,8 +111,8 @@ def _check_r3_exterior_islands(struct: np.ndarray, max_cc_report: int) -> list[V
         issues.append(
             ValidationIssue(
                 code="EXTERIOR_ISLAND",
-                message=f"[EXTERIOR_ISLAND] Mancha de exterior (0) sin contacto con el borde del mapa "
-                f"(área≈{area} celdas, repr {rep}). ¿Patio mal cerrado o hueco?",
+                message=f"[EXTERIOR_ISLAND] Outdoor area does not connect to the outside edge "
+                f"(area≈{area} cells, example {rep}). Check if a patio or hole was marked incorrectly.",
                 severity="error",
                 cells=(rep,),
             )
@@ -157,8 +157,8 @@ def _check_r4_flood_non_wall(
     sample = tuple((int(r), int(c)) for r, c in coords)
     total = int(bad_mask.sum())
     msg = (
-        f"[INTERIOR_LEAKS_TO_BORDER] {total} celdas interior alcanzables desde el borde sin cruzar muro "
-        f"(modo estricto; normal en planos con puerta). Ej.: {sample}"
+        f"[INTERIOR_LEAKS_TO_BORDER] {total} indoor cells can be reached from the map edge without crossing a wall "
+        f"(strict mode; common in plans with doors). Example: {sample}"
     )
     return [ValidationIssue(code="INTERIOR_LEAKS_TO_BORDER", message=msg, severity="error", cells=sample)]
 
@@ -185,7 +185,7 @@ def _check_opening_orphans(struct: np.ndarray) -> list[ValidationIssue]:
                     ValidationIssue(
                         code="OPENING_NO_ADJACENT_FREE",
                         message=f"[OPENING_NO_ADJACENT_FREE] {label} cc={cc} bbox=({y0}:{y1},{x0}:{x1}) "
-                        f"sin vecino 4-conexo exterior(0) o interior(4).",
+                        f"without a directly adjacent outdoor or indoor cell.",
                         severity="error",
                         cells=((y0, x0),),
                     )
@@ -198,7 +198,7 @@ def _check_interior_exists(struct: np.ndarray) -> list[ValidationIssue]:
         return [
             ValidationIssue(
                 code="NO_INTERIOR",
-                message="[NO_INTERIOR] No hay celdas interior (4) en la grilla.",
+                message="[NO_INTERIOR] No indoor cells were found in the matrix.",
                 severity="error",
                 cells=(),
             )
@@ -305,7 +305,7 @@ def build_validation_checklist(
         items.append(
             ValidationCheckItem(
                 id="marker_main",
-                label="Puerta principal marcada en el plano",
+                label="Front door marker is placed",
                 ok=me is not None,
                 blocks_proposal=True,
                 detail=None
@@ -316,7 +316,7 @@ def build_validation_checklist(
         items.append(
             ValidationCheckItem(
                 id="marker_board",
-                label="Tablero eléctrico marcado",
+                label="Electrical board marker is placed",
                 ok=eb is not None,
                 blocks_proposal=True,
                 detail=None
@@ -332,7 +332,7 @@ def build_validation_checklist(
         items.append(
             ValidationCheckItem(
                 id="struct_patches",
-                label="Parches de estructura (pintura) válidos",
+                label="Matrix edits are valid",
                 ok=len(pe) == 0,
                 blocks_proposal=True,
                 detail=None if not pe else " · ".join(pe),
@@ -344,7 +344,7 @@ def build_validation_checklist(
             items.append(
                 ValidationCheckItem(
                     id="main_door_cell",
-                    label="Puerta principal sobre celda puerta (struct=3)",
+                    label="Front door is on a Door cell",
                     ok=len(m_err) == 0,
                     blocks_proposal=True,
                     detail=None if not m_err else m_err[0],
@@ -355,7 +355,7 @@ def build_validation_checklist(
             items.append(
                 ValidationCheckItem(
                     id="board_interior",
-                    label="Tablero sobre celda interior (struct=4)",
+                    label="Electrical board is on an Interior cell",
                     ok=len(b_err) == 0,
                     blocks_proposal=True,
                     detail=None if not b_err else b_err[0],
@@ -374,13 +374,13 @@ def build_validation_checklist(
                     if not touches:
                         main_ex_ok = False
                         main_ex_detail = (
-                            "[MAIN_ENTRY_NO_EXTERIOR] La puerta principal debe ser 4-vecina de al menos "
-                            "una celda exterior (0) — típico de acceso fachada."
+                            "[MAIN_ENTRY_NO_EXTERIOR] Front door must be on a Door cell with "
+                            "an Outdoor cell directly next to it."
                         )
             items.append(
                 ValidationCheckItem(
                     id="main_entry_exterior",
-                    label="Puerta principal linda con exterior (0)",
+                    label="Front door has an Outdoor cell next to it",
                     ok=main_ex_ok,
                     blocks_proposal=True,
                     detail=main_ex_detail,
@@ -404,14 +404,14 @@ def build_validation_checklist(
             )
         )
 
-    _one("NO_INTERIOR", "Hay al menos una celda interior (4)")
-    _one("INT_EXT_ADJ", "Interior no pegado directamente a exterior (regla R1)")
-    _one("EXTERIOR_ISLAND", "Sin manchas de exterior cerradas / patios huecos (R3)")
+    _one("NO_INTERIOR", "The plan includes indoor space")
+    _one("INT_EXT_ADJ", "Indoor cells are separated from outdoor cells")
+    _one("EXTERIOR_ISLAND", "Outdoor areas connect to the outside edge")
     orphans = by_code.get("OPENING_NO_ADJACENT_FREE", [])
     items.append(
         ValidationCheckItem(
             id="opening_adjacent_free",
-            label="Ventanas y puertas con vecino interior o exterior",
+            label="Doors and windows touch indoor or outdoor space",
             ok=len(orphans) == 0,
             blocks_proposal=True,
             detail=None if not orphans else orphans[0].message,
@@ -420,14 +420,14 @@ def build_validation_checklist(
     if topology_options and topology_options.r4_interior_reachable_without_wall:
         _one(
             "INTERIOR_LEAKS_TO_BORDER",
-            "Interior no alcanzable desde el borde sin muro (modo estricto R4)",
+            "Indoor cells are not reachable from the map edge without a wall",
         )
 
     open_warns = [w for w in topo.warnings if w.code.startswith("OPENING_")]
     items.append(
         ValidationCheckItem(
             id="opening_geometry",
-            label="Heurística muro en lados de aperturas (largo/corto)",
+            label="Door and window surrounding walls look reasonable",
             ok=len(open_warns) == 0,
             blocks_proposal=False,
             detail=None if not open_warns else " · ".join(w.message for w in open_warns),
@@ -447,7 +447,7 @@ def collect_validation_highlight_cells(
 ) -> tuple[set[tuple[int, int]], set[tuple[int, int]], set[tuple[int, int]]]:
     """
     Sets of ``(row, col)`` for map overlay:
-    blocking errors, warnings cara corta libre, warnings muro en cara larga.
+    blocking errors and opening/wall warnings.
     Same gates as :func:`build_validation_checklist` for marker/placement extras.
     """
     s = np.asarray(struct, dtype=np.uint8)

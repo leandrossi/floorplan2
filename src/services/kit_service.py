@@ -4,13 +4,13 @@ from domain.contracts import KitViewModel, ProposalViewModel
 from domain.enums import SecurityLevel
 
 DEVICE_COPY: dict[str, tuple[str, str]] = {
-    "panel": ("Panel central", "Coordina todo el sistema de alarma."),
-    "keyboard": ("Teclado", "Permite activar y desactivar la alarma."),
-    "magnetic": ("Sensor magnético", "Protege accesos como puertas y ventanas."),
-    "pir": ("Sensor de movimiento", "Cubre áreas de paso dentro de la casa."),
-    "pircam": ("Sensor con cámara", "Detecta movimiento y agrega verificación visual."),
-    "siren_indoor": ("Sirena interior", "Alerta dentro de la vivienda."),
-    "siren_outdoor": ("Sirena exterior", "Hace visible y audible la alarma desde afuera."),
+    "panel": ("Central panel", "Coordinates the whole alarm system."),
+    "keyboard": ("Keypad", "Arm and disarm the system."),
+    "magnetic": ("Magnetic contact", "Protects openings such as doors and windows."),
+    "pir": ("Motion sensor", "Covers movement in hallways and rooms."),
+    "pircam": ("Camera sensor", "Detects movement with visual verification."),
+    "siren_indoor": ("Indoor siren", "Alerts inside the home."),
+    "siren_outdoor": ("Outdoor siren", "Makes the alarm visible and audible outside."),
 }
 
 
@@ -20,7 +20,7 @@ class KitService:
         for device_type, qty in sorted(proposal.counts_by_type.items()):
             friendly_name, purpose = DEVICE_COPY.get(
                 device_type,
-                (device_type.replace("_", " ").title(), "Componente incluido en la solución."),
+                (device_type.replace("_", " ").title(), "Included in this recommendation."),
             )
             items.append(
                 {
@@ -33,12 +33,11 @@ class KitService:
 
         level = SecurityLevel.from_planner_code(proposal.security_level)
         hero_summary = (
-            f"Kit {level.label}: una selección clara de componentes para instalar la propuesta "
-            "que viste sobre tu plano."
+            f"{level.label} kit: a clear parts list to install the setup you reviewed on your floorplan."
         )
         return KitViewModel(
             items=items,
             hero_summary=hero_summary,
-            cta_payload={"primary": "Empezar otro plano", "secondary": "Volver a la solución"},
+            cta_payload={"primary": "Start another floorplan", "secondary": "Back to solution"},
             level_label=level.label,
         )

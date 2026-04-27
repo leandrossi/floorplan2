@@ -61,6 +61,8 @@ class ProposalViewModel:
     proposal_summary: str
     proposal_path: str | None = None
     report_path: str | None = None
+    grid_h: int = 0
+    grid_w: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

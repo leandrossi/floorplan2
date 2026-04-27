@@ -8,16 +8,16 @@ from domain.enums import SecurityLevel
 def render_security_level_selector(current: SecurityLevel) -> SecurityLevel:
     options = [SecurityLevel.BASIC, SecurityLevel.RECOMMENDED, SecurityLevel.MAXIMUM]
     selected = st.radio(
-        "Nivel de protección",
+        "Protection level",
         options=options,
         index=options.index(current),
         horizontal=True,
         format_func=lambda level: level.label,
     )
     hints = {
-        SecurityLevel.BASIC: "Lo esencial para cubrir los accesos principales.",
-        SecurityLevel.RECOMMENDED: "El balance recomendado para la mayoría de las viviendas.",
-        SecurityLevel.MAXIMUM: "Cobertura más completa sobre accesos y circulación.",
+        SecurityLevel.BASIC: "Essential coverage for the main access points.",
+        SecurityLevel.RECOMMENDED: "The balanced option recommended for most homes.",
+        SecurityLevel.MAXIMUM: "More complete coverage for access points and movement areas.",
     }
     st.caption(hints[selected])
     return selected

@@ -193,6 +193,7 @@ def render_interactive_review(
     grid_h: int,
     mode: str,
     paint_enabled: bool,
+    paint_mode: str,
     key: str,
 ) -> dict[str, Any] | None:
     if grid_paint_image is not None:
@@ -206,6 +207,8 @@ def render_interactive_review(
             cursor="crosshair",
             enable_paint=paint_enabled,
             pick_on_click=mode in ("main_entry", "electric_board"),
+            paint_mode=paint_mode,
+            max_height=760,
         )
         return result if isinstance(result, dict) else None
 

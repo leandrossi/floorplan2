@@ -34,6 +34,18 @@ function addGridLine(c0, c1, strokeCells) {
   }
 }
 
+function addGridRect(c0, c1, strokeCells) {
+  const minX = Math.min(c0[0], c1[0]);
+  const maxX = Math.max(c0[0], c1[0]);
+  const minY = Math.min(c0[1], c1[1]);
+  const maxY = Math.max(c0[1], c1[1]);
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      strokeCells.set(x + "," + y, [x, y]);
+    }
+  }
+}
+
 function addCellFromOffsets(offsetX, offsetY, img, gridW, gridH, strokeCells, lastGrid) {
   const g = pixelToGrid(offsetX, offsetY, img, gridW, gridH);
   if (!g) {
@@ -56,13 +68,27 @@ function explicitFalse(v) {
 }
 
 function onRender(event) {
-  const { src, grid_w, grid_h, width, height, cursor, enable_paint, pick_on_click } = event.detail.args;
+  const {
+    src,
+    grid_w,
+    grid_h,
+    width,
+    height,
+    cursor,
+    enable_paint,
+    pick_on_click,
+    paint_mode,
+    max_height,
+  } = event.detail.args;
   const img = document.getElementById("image");
+  const preview = document.getElementById("preview-layer");
   const gridW = parseInt(grid_w, 10);
   const gridH = parseInt(grid_h, 10);
   /* Default enable_paint true when arg omitted (older component cache). */
   const enablePaint = !explicitFalse(enable_paint);
   const pickOnClick = truthy(pick_on_click);
+  const paintMode = paint_mode || "cell";
+  const maxHeight = Number(max_height || 760);
   const coordEl = document.getElementById("coord-hint");
 
   if (img.src !== src) {
@@ -94,7 +120,16 @@ function onRender(event) {
       img.width = img.naturalWidth;
       img.height = img.naturalHeight;
     }
-    Streamlit.setFrameHeight(img.height + 8);
+    preview.width = img.width;
+    preview.height = img.height;
+    preview.style.width = img.width + "px";
+    preview.style.height = img.height + "px";
+    if (container) {
+      container.style.maxHeight = maxHeight + "px";
+      container.style.height = Math.min(img.height, maxHeight) + "px";
+    }
+    const frameHeight = Math.min(img.height + 8, maxHeight + 8);
+    Streamlit.setFrameHeight(frameHeight);
   }
 
   img.onload = resizeImage;
@@ -110,8 +145,39 @@ function onRender(event) {
     coordEl.textContent = g ? `col ${g[0]} · fila ${g[1]}` : "col — · fila —";
   }
 
+  function clearPreview() {
+    const ctx = preview.getContext("2d");
+    ctx.clearRect(0, 0, preview.width, preview.height);
+  }
+
+  function drawPreview(cells) {
+    const ctx = preview.getContext("2d");
+    ctx.clearRect(0, 0, preview.width, preview.height);
+    if (!cells || cells.length === 0) {
+      return;
+    }
+    const cellW = img.width / gridW;
+    const cellH = img.height / gridH;
+    ctx.fillStyle = "rgba(30, 58, 138, 0.28)";
+    ctx.strokeStyle = "rgba(30, 58, 138, 0.82)";
+    ctx.lineWidth = 1;
+    for (const [cx, cy] of cells) {
+      const x = cx * cellW;
+      const y = cy * cellH;
+      ctx.fillRect(x, y, cellW, cellH);
+      ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
+    }
+  }
+
   let painting = false;
+  let panning = false;
+  let spacePressed = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panStartScrollLeft = 0;
+  let panStartScrollTop = 0;
   let strokeCells = new Map();
+  let startGrid = null;
   let lastGrid = null;
 
   function finishStroke() {
@@ -132,30 +198,113 @@ function onRender(event) {
       });
     }
     strokeCells = new Map();
+    startGrid = null;
     lastGrid = null;
     painting = false;
+    clearPreview();
+  }
+
+  function finishPan() {
+    if (!panning) {
+      return;
+    }
+    panning = false;
+    document.body.classList.remove("is-panning");
+    document.documentElement.style.cursor = cur;
+    document.body.style.cursor = cur;
+    if (container) {
+      container.style.cursor = cur;
+    }
+    img.style.cursor = cur;
   }
 
   function onWindowMouseUp(ev) {
+    if (panning) {
+      finishPan();
+      return;
+    }
     if (!painting) {
       return;
     }
     const rect = img.getBoundingClientRect();
     const ox = ev.clientX - rect.left;
     const oy = ev.clientY - rect.top;
-    lastGrid = addCellFromOffsets(ox, oy, img, gridW, gridH, strokeCells, lastGrid);
+    const g = pixelToGrid(ox, oy, img, gridW, gridH);
+    if (g) {
+      if (paintMode === "line" && startGrid) {
+        strokeCells = new Map();
+        addGridLine(startGrid, g, strokeCells);
+      } else if (paintMode === "area" && startGrid) {
+        strokeCells = new Map();
+        addGridRect(startGrid, g, strokeCells);
+      } else {
+        lastGrid = addCellFromOffsets(ox, oy, img, gridW, gridH, strokeCells, lastGrid);
+      }
+    }
     finishStroke();
   }
 
   img.onmousemove = (e) => {
     updateCoord(e.offsetX, e.offsetY);
     if (enablePaint && painting) {
-      lastGrid = addCellFromOffsets(e.offsetX, e.offsetY, img, gridW, gridH, strokeCells, lastGrid);
+      const g = pixelToGrid(e.offsetX, e.offsetY, img, gridW, gridH);
+      if (!g) {
+        return;
+      }
+      if (paintMode === "line" && startGrid) {
+        strokeCells = new Map();
+        addGridLine(startGrid, g, strokeCells);
+        drawPreview(Array.from(strokeCells.values()));
+      } else if (paintMode === "area" && startGrid) {
+        strokeCells = new Map();
+        addGridRect(startGrid, g, strokeCells);
+        drawPreview(Array.from(strokeCells.values()));
+      } else {
+        lastGrid = addCellFromOffsets(e.offsetX, e.offsetY, img, gridW, gridH, strokeCells, lastGrid);
+        drawPreview(Array.from(strokeCells.values()));
+      }
     }
   };
 
   img.onclick = null;
   img.onmousedown = null;
+
+  window.onkeydown = (ev) => {
+    if (ev.code === "Space") {
+      spacePressed = true;
+      if (!painting && !panning) {
+        document.body.classList.add("is-panning");
+        if (container) {
+          container.style.cursor = "grab";
+        }
+        img.style.cursor = "grab";
+      }
+      ev.preventDefault();
+    }
+  };
+  window.onkeyup = (ev) => {
+    if (ev.code === "Space") {
+      spacePressed = false;
+      if (!panning && !painting) {
+        document.body.classList.remove("is-panning");
+        if (container) {
+          container.style.cursor = cur;
+        }
+        img.style.cursor = cur;
+      }
+      ev.preventDefault();
+    }
+  };
+
+  window.onmousemove = (ev) => {
+    if (!panning || !container) {
+      return;
+    }
+    const dx = ev.clientX - panStartX;
+    const dy = ev.clientY - panStartY;
+    container.scrollLeft = panStartScrollLeft - dx;
+    container.scrollTop = panStartScrollTop - dy;
+  };
 
   if (!enablePaint && pickOnClick) {
     img.onclick = (e) => {
@@ -176,11 +325,23 @@ function onRender(event) {
   }
 
   if (!enablePaint) {
+    clearPreview();
     return;
   }
 
   img.onmousedown = (e) => {
     e.preventDefault();
+    if (spacePressed && container) {
+      panning = true;
+      painting = false;
+      document.body.classList.add("is-panning");
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      panStartScrollLeft = container.scrollLeft;
+      panStartScrollTop = container.scrollTop;
+      window.addEventListener("mouseup", onWindowMouseUp, { once: true });
+      return;
+    }
     painting = true;
     document.body.classList.add("is-painting");
     document.documentElement.style.cursor = "grabbing";
@@ -190,8 +351,20 @@ function onRender(event) {
     }
     img.style.cursor = "grabbing";
     strokeCells = new Map();
+    startGrid = null;
     lastGrid = null;
-    lastGrid = addCellFromOffsets(e.offsetX, e.offsetY, img, gridW, gridH, strokeCells, lastGrid);
+    const g = pixelToGrid(e.offsetX, e.offsetY, img, gridW, gridH);
+    if (!g) {
+      painting = false;
+      return;
+    }
+    startGrid = g;
+    if (paintMode === "line" || paintMode === "area") {
+      strokeCells.set(g[0] + "," + g[1], g);
+    } else {
+      lastGrid = addCellFromOffsets(e.offsetX, e.offsetY, img, gridW, gridH, strokeCells, lastGrid);
+    }
+    drawPreview(Array.from(strokeCells.values()));
     window.addEventListener("mouseup", onWindowMouseUp, { once: true });
   };
 

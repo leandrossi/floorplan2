@@ -61,6 +61,7 @@ class ReviewService:
         struct_patch: list[dict[str, int]],
         main_entry: list[int] | None,
         electric_board: list[int] | None,
+        require_markers: bool = True,
     ) -> dict[str, Any]:
         bundle = self.load_bundle(bundle_path)
         approved = self.build_approved_payload(
@@ -73,19 +74,19 @@ class ReviewService:
         checklist = build_validation_checklist(
             effective_struct,
             approved,
-            require_markers=True,
+            require_markers=require_markers,
             main_entry_must_touch_exterior=True,
         )
         error_cells, warning_short, warning_long = collect_validation_highlight_cells(
             effective_struct,
             approved,
-            require_markers=True,
+            require_markers=require_markers,
             main_entry_must_touch_exterior=True,
         )
         blocking_errors, warnings = validate_grid_for_alarm(
             effective_struct,
             approved,
-            require_markers=True,
+            require_markers=require_markers,
             main_entry_must_touch_exterior=True,
         )
         return {

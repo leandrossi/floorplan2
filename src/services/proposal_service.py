@@ -70,30 +70,22 @@ class ProposalService:
         self.review_adapter = review_adapter or ReviewBundleAdapter()
         self.artifact_store = artifact_store or ArtifactStore()
 
-    def build(
+    def resolve_devices_for_overlay(
         self,
         *,
-        workspace,
         review_bundle_path: Path,
         review_approved_path: Path,
-        level: SecurityLevel,
-        progress_cb: ProgressCallback | None = None,
-    ) -> ProposalViewModel:
-        generated = self.adapter.generate_proposal(
-            workspace,
-            security_level=level.planner_code,
-            review_approved_path=review_approved_path,
-            progress_cb=progress_cb,
-        )
-        proposal = generated["proposal"]
-        report = generated["report"]
+        proposal_devices: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        """Align proposal device cells with approved markers (same logic as overlay render)."""
         bundle = self.review_adapter.load(review_bundle_path)
         approved = load_approved(review_approved_path) or {}
         effective_struct = apply_struct_patches(bundle.struct, approved.get("struct_patch") or [])
+        grid_h, grid_w = int(effective_struct.shape[0]), int(effective_struct.shape[1])
 
+        devices = [dict(d) for d in proposal_devices if isinstance(d, dict)]
         main_entry = approved.get("main_entry")
         electric_board = approved.get("electric_board")
-        devices = [dict(d) for d in (proposal.get("devices") or []) if isinstance(d, dict)]
         if isinstance(main_entry, list) and len(main_entry) == 2:
             magnetic_idx = next(
                 (idx for idx, d in enumerate(devices) if str(d.get("device_type") or "").lower() == "magnetic"),
@@ -120,6 +112,38 @@ class ProposalService:
                 )
                 if keyboard_target is not None:
                     devices[keyboard_idx]["cell"] = [int(keyboard_target[0]), int(keyboard_target[1])]
+
+        return devices, grid_h, grid_w
+
+    def build(
+        self,
+        *,
+        workspace,
+        review_bundle_path: Path,
+        review_approved_path: Path,
+        level: SecurityLevel,
+        progress_cb: ProgressCallback | None = None,
+    ) -> ProposalViewModel:
+        generated = self.adapter.generate_proposal(
+            workspace,
+            security_level=level.planner_code,
+            review_approved_path=review_approved_path,
+            progress_cb=progress_cb,
+        )
+        proposal = generated["proposal"]
+        report = generated["report"]
+        bundle = self.review_adapter.load(review_bundle_path)
+        approved = load_approved(review_approved_path) or {}
+        effective_struct = apply_struct_patches(bundle.struct, approved.get("struct_patch") or [])
+
+        main_entry = approved.get("main_entry")
+        electric_board = approved.get("electric_board")
+        raw_devices = [dict(d) for d in (proposal.get("devices") or []) if isinstance(d, dict)]
+        devices, grid_h, grid_w = self.resolve_devices_for_overlay(
+            review_bundle_path=review_bundle_path,
+            review_approved_path=review_approved_path,
+            proposal_devices=raw_devices,
+        )
 
         device_img = rgb_from_struct(effective_struct)
         device_img = upscale_rgb(device_img, PROPOSAL_RENDER_WIDTH)
@@ -151,15 +175,17 @@ class ProposalService:
         counts = report.get("device_counts") or device_counts
         total_devices = sum(int(v) for v in counts.values())
         summary = (
-            f"{level.label}: {total_devices} dispositivos distribuidos sobre el plano "
-            "para cubrir accesos y circulación sin cambiar el diagnóstico base."
+            f"{level.label}: {total_devices} devices placed on your floorplan to cover access and circulation—"
+            "the base diagnosis stays fixed."
         )
         return ProposalViewModel(
             security_level=level.planner_code,
-            devices=list(proposal.get("devices") or []),
+            devices=devices,
             overlay_path=str(overlay_path),
             counts_by_type={str(k): int(v) for k, v in counts.items()},
             proposal_summary=summary,
             proposal_path=str(generated["paths"]["proposal_path"]),
             report_path=str(generated["paths"]["report_path"]),
+            grid_h=grid_h,
+            grid_w=grid_w,
         )

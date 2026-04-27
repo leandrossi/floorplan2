@@ -12,8 +12,8 @@ def render(controller) -> None:
     try:
         risk_view = controller.ensure_risk_view()
     except Exception as exc:  # noqa: BLE001
-        st.error(f"No pudimos construir el diagnóstico visual: {exc}")
-        if st.button("Volver a la revisión", width="stretch"):
+        st.error(f"We couldn't build the visual diagnosis: {exc}")
+        if st.button("Back to review", width="stretch"):
             controller.go_to(WizardScreen.REVIEW)
             st.rerun()
         return
@@ -21,9 +21,6 @@ def render(controller) -> None:
     st.markdown(
         """
         <style>
-        .risk-step-meta {color:#667085;font-size:0.92rem;margin:0.1rem 0 0.2rem 0;font-weight:600;}
-        .risk-title {font-size:1.72rem;font-weight:700;color:#111827;margin:0 0 0.28rem 0;line-height:1.2;}
-        .risk-subtitle {color:#667085;font-size:0.98rem;margin:0 0 1rem 0;max-width:920px;}
         .risk-map-card {
             background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
             border: 1px solid #E8EDF3;
@@ -52,13 +49,17 @@ def render(controller) -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.markdown('<p class="risk-step-meta">Paso 5 de 8 · Diagnóstico</p>', unsafe_allow_html=True)
+    st.markdown('<main class="wizard-page-shell">', unsafe_allow_html=True)
     st.markdown(
-        '<p class="risk-title">Estas son las áreas que hoy requieren mayor protección</p>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        '<p class="risk-subtitle">Marcamos las zonas más expuestas de tu vivienda para que entiendas dónde conviene concentrar la cobertura.</p>',
+        """
+        <header class="wizard-page-header">
+          <p class="wizard-step-context">Step 4 · Risk diagnosis</p>
+          <h1 class="wizard-page-title">These areas need the most attention.</h1>
+          <p class="wizard-page-subtitle">
+            We highlight the most exposed zones so you can understand where protection matters before choosing a solution.
+          </p>
+        </header>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -66,13 +67,16 @@ def render(controller) -> None:
 
     with canvas_col:
         st.markdown('<div class="risk-map-card">', unsafe_allow_html=True)
-        show_image_path(risk_view.risk_overlay_path, caption="Diagnóstico base del plano")
-        st.markdown('<p class="risk-caption">Diagnóstico base del plano</p>', unsafe_allow_html=True)
+        show_image_path(risk_view.risk_overlay_path, caption="Baseline risk overlay on your floorplan")
+        st.markdown(
+            '<p class="risk-caption">Baseline risk overlay on your floorplan</p>',
+            unsafe_allow_html=True,
+        )
         st.markdown(
             """
             <div class="risk-legend-wrap">
-                <div class="risk-chip"><span class="risk-swatch" style="background:#E85D75;"></span>Mayor exposición</div>
-                <div class="risk-chip"><span class="risk-swatch" style="background:#F7B3C2;"></span>Exposición media</div>
+                <div class="risk-chip"><span class="risk-swatch" style="background:#E85D75;"></span>Highest exposure</div>
+                <div class="risk-chip"><span class="risk-swatch" style="background:#F7B3C2;"></span>Medium exposure</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -81,19 +85,19 @@ def render(controller) -> None:
         with icon_col_1:
             st.image(marker_legend_icon("main_entry"), width=18)
         with text_col_1:
-            st.caption("Entrada principal")
+            st.caption("Main entrance")
         with icon_col_2:
             st.image(marker_legend_icon("electric_board"), width=18)
         with text_col_2:
-            st.caption("Tablero eléctrico")
+            st.caption("Electrical board")
         st.markdown("</div>", unsafe_allow_html=True)
 
     with side_col:
-        st.markdown('<div class="risk-card"><h4>Diagnóstico</h4>', unsafe_allow_html=True)
+        st.markdown('<div class="risk-card"><h4>Diagnosis</h4>', unsafe_allow_html=True)
         st.markdown(f'<p class="risk-body">{risk_view.summary_text}</p>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="risk-card"><h4>Hallazgos principales</h4>', unsafe_allow_html=True)
+        st.markdown('<div class="risk-card"><h4>Key findings</h4>', unsafe_allow_html=True)
         st.markdown(
             "<ul>"
             + "".join(f"<li>{detail}</li>" for detail in risk_view.details[:3])
@@ -105,18 +109,19 @@ def render(controller) -> None:
         st.markdown(
             """
             <div class="risk-callout">
-            Este diagnóstico base queda fijo. En el siguiente paso vas a comparar distintas soluciones para proteger estas áreas.
+            This diagnosis stays fixed. Next, you’ll compare protection options for these areas.
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.caption(
-            "No necesitás interpretar cada detalle del mapa: en el siguiente paso te mostramos cómo cubrir estas zonas."
+            "You don’t need to interpret every detail. The next step translates this into a recommended solution."
         )
-        back_clicked, next_clicked = render_action_footer(back_label="Volver", next_label="Ver solución")
+        back_clicked, next_clicked = render_action_footer(back_label="Back to review", next_label="View solution")
         if back_clicked:
             controller.go_to(WizardScreen.REVIEW)
             st.rerun()
         if next_clicked:
             controller.go_to(WizardScreen.PROPOSAL)
             st.rerun()
+    st.markdown("</main>", unsafe_allow_html=True)

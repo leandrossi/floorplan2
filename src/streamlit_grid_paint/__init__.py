@@ -24,6 +24,8 @@ def grid_paint_image(
     cursor: str = "crosshair",
     enable_paint: bool = True,
     pick_on_click: bool = False,
+    paint_mode: str = "cell",
+    max_height: int = 760,
     image_format: str = "PNG",
     png_compression_level: int = 3,
 ) -> dict | None:
@@ -58,4 +60,6 @@ def grid_paint_image(
         cursor=cursor,
         enable_paint=bool(enable_paint),
         pick_on_click=bool(pick_on_click),
+        paint_mode=str(paint_mode),
+        max_height=int(max_height),
     )

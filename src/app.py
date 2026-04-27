@@ -6,7 +6,7 @@ from application.navigation import SCREEN_ORDER
 from application.wizard_controller import WizardController
 from domain.enums import WizardScreen
 from ui.components.stepper import render_stepper
-from ui.screens import intro, kit, processing, proposal, review, risk, upload
+from ui.screens import intro, kit, processing, proposal, review, review_markers, risk, upload
 from ui.theme.styles import inject_app_styles
 
 
@@ -31,8 +31,13 @@ def main() -> None:
         st.rerun()
         return
 
+    if "floorplan_example" in st.query_params and current_screen is not WizardScreen.UPLOAD:
+        controller.go_to(WizardScreen.UPLOAD)
+        st.rerun()
+        return
+
     if current_screen is not WizardScreen.INTRO:
-        st.caption("Asesor visual para protección domiciliaria")
+        st.caption("Guided home protection wizard")
         render_stepper(current_screen)
 
     dispatch = {
@@ -40,6 +45,7 @@ def main() -> None:
         WizardScreen.UPLOAD: upload.render,
         WizardScreen.PROCESSING: processing.render,
         WizardScreen.REVIEW: review.render,
+        WizardScreen.REVIEW_MARKERS: review_markers.render,
         WizardScreen.RISK: risk.render,
         WizardScreen.PROPOSAL: proposal.render,
         WizardScreen.KIT: kit.render,

@@ -65,8 +65,8 @@ def scan_opening_adjacency_violations(struct_m: np.ndarray) -> list[OpeningViola
                     out.append(
                         OpeningViolation(
                             code="OPENING_LONG_SIDE_WALL",
-                            message=f"{label} cc={cc} orient={orient} bbox=({y0}:{y1},{x0}:{x1}): "
-                            f"muro en cara larga en ({y},{x})",
+                            message=f"{label} opening at ({y0}:{y1},{x0}:{x1}): "
+                            f"nearby wall at ({y},{x}) may need review",
                             opening_label=label,
                             cc_id=cc,
                             orient=orient,
@@ -86,8 +86,8 @@ def scan_opening_adjacency_violations(struct_m: np.ndarray) -> list[OpeningViola
                     out.append(
                         OpeningViolation(
                             code="OPENING_SHORT_SIDE_FREE",
-                            message=f"{label} cc={cc} orient={orient} bbox=({y0}:{y1},{x0}:{x1}): "
-                            f"exterior/interior en cara corta en ({y},{x})",
+                            message=f"{label} opening at ({y0}:{y1},{x0}:{x1}): "
+                            f"nearby indoor/outdoor cell at ({y},{x}) may need review",
                             opening_label=label,
                             cc_id=cc,
                             orient=orient,
@@ -108,8 +108,8 @@ def scan_opening_adjacency_violations(struct_m: np.ndarray) -> list[OpeningViola
                     out.append(
                         OpeningViolation(
                             code="OPENING_LONG_SIDE_WALL",
-                            message=f"{label} cc={cc} orient={orient} bbox=({y0}:{y1},{x0}:{x1}): "
-                            f"muro en cara larga en ({y},{x})",
+                            message=f"{label} opening at ({y0}:{y1},{x0}:{x1}): "
+                            f"nearby wall at ({y},{x}) may need review",
                             opening_label=label,
                             cc_id=cc,
                             orient=orient,
@@ -129,8 +129,8 @@ def scan_opening_adjacency_violations(struct_m: np.ndarray) -> list[OpeningViola
                     out.append(
                         OpeningViolation(
                             code="OPENING_SHORT_SIDE_FREE",
-                            message=f"{label} cc={cc} orient={orient} bbox=({y0}:{y1},{x0}:{x1}): "
-                            f"exterior/interior en cara corta en ({y},{x})",
+                            message=f"{label} opening at ({y0}:{y1},{x0}:{x1}): "
+                            f"nearby indoor/outdoor cell at ({y},{x}) may need review",
                             opening_label=label,
                             cc_id=cc,
                             orient=orient,
