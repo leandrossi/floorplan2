@@ -96,7 +96,7 @@ class WizardController:
         state.upload_path = str(upload_path)
         state.uploaded_file_name = filename
         state.processing_status = ProcessingStatus.QUEUED.value
-        state.processing_message = "Plano cargado. Vamos a analizarlo."
+        state.processing_message = "Floorplan uploaded. We'll analyze it now."
         state.processing_requested = True
         state.current_screen = WizardScreen.PROCESSING.value
         return self.persist(state)
@@ -104,13 +104,13 @@ class WizardController:
     def run_processing(self, progress_cb: ProgressCallback | None = None) -> WizardSessionState:
         state = self.state()
         if not state.upload_path:
-            state.last_error = "Falta un plano cargado para iniciar el análisis."
+            state.last_error = "Upload a floorplan before starting the analysis."
             state.processing_status = ProcessingStatus.FAILED.value
             return self.persist(state)
 
         workspace = self._workspace(state)
         state.processing_status = ProcessingStatus.RUNNING.value
-        state.processing_message = "Estamos interpretando el plano."
+        state.processing_message = "We're reading the floorplan."
         self.persist(state)
 
         result = self.processing_service.process_existing_upload(
@@ -134,7 +134,7 @@ class WizardController:
     def get_review_validation(self, *, require_markers: bool = True) -> dict:
         state = self.state()
         if not state.review_bundle_path:
-            raise RuntimeError("No hay datos de revisión cargados.")
+            raise RuntimeError("No review data is loaded.")
         return self.review_service.build_validation_state(
             bundle_path=Path(state.review_bundle_path),
             struct_patch=state.struct_patch,
@@ -159,7 +159,7 @@ class WizardController:
     def approve_review(self) -> ReviewResult:
         state = self.state()
         if not state.review_bundle_path:
-            raise RuntimeError("No hay bundle de revisión disponible.")
+            raise RuntimeError("No review bundle is available.")
         workspace = self._workspace(state)
         result = self.review_service.approve(
             bundle_path=Path(state.review_bundle_path),
@@ -186,7 +186,7 @@ class WizardController:
     def ensure_risk_view(self) -> RiskViewModel:
         state = self.state()
         if not state.review_bundle_path or not state.review_approved_path:
-            raise RuntimeError("Primero tenés que aprobar la revisión.")
+            raise RuntimeError("Approve the review before building the diagnosis.")
         workspace = self._workspace(state)
         if state.risk_overlay_path and Path(state.risk_overlay_path).is_file():
             try:
@@ -276,7 +276,7 @@ class WizardController:
     def ensure_proposal_view(self, progress_cb: ProgressCallback | None = None) -> ProposalViewModel:
         state = self.state()
         if not state.review_bundle_path or not state.review_approved_path:
-            raise RuntimeError("La propuesta necesita una revisión aprobada.")
+            raise RuntimeError("The solution needs an approved review.")
         level = SecurityLevel(state.proposal_level)
         cached = self._proposal_from_cache(state, level)
         if cached is not None:

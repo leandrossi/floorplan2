@@ -61,7 +61,7 @@ def render(controller) -> None:
         if state.processing_status == ProcessingStatus.FAILED.value:
             progress.progress(0.0, text="We couldn’t finish the analysis.")
             st.error(state.last_error or "Something went wrong while analyzing the floorplan.")
-            if st.button("Volver a subir el plano", width="stretch"):
+            if st.button("Upload another floorplan", width="stretch"):
                 controller.start_flow()
                 st.rerun()
 

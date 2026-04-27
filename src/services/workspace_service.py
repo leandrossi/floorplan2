@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,7 +8,15 @@ from uuid import uuid4
 
 from pipeline_common import PROJECT_ROOT
 
-WORKSPACES_ROOT = PROJECT_ROOT / "workspaces"
+APP_WORKSPACES_ROOT_ENV = "APP_WORKSPACES_ROOT"
+DEFAULT_WORKSPACES_ROOT = PROJECT_ROOT / "workspaces"
+
+
+def resolve_workspaces_root() -> Path:
+    configured = os.environ.get(APP_WORKSPACES_ROOT_ENV, "").strip()
+    if not configured:
+        return DEFAULT_WORKSPACES_ROOT
+    return Path(configured).expanduser().resolve()
 
 
 def _safe_name(filename: str) -> str:
@@ -54,7 +63,7 @@ class SessionWorkspace:
 
 class WorkspaceService:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or WORKSPACES_ROOT
+        self.root = root or resolve_workspaces_root()
 
     def create_session_id(self) -> str:
         return uuid4().hex

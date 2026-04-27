@@ -104,16 +104,16 @@ def _render_example_card(example: dict, idx: int) -> None:
 
 def _validate_uploaded_plan(uploaded_file) -> tuple[bool, str | None, bytes | None, bool]:
     if uploaded_file is None:
-        return False, "Subí un archivo para continuar.", None, False
+        return False, "Upload a file to continue.", None, False
 
     filename = (uploaded_file.name or "").strip()
     extension = filename.rsplit(".", maxsplit=1)[-1].lower() if "." in filename else ""
     if extension not in ALLOWED_EXTENSIONS:
-        return False, "Este formato no es compatible. Usá PDF, JPG o PNG.", None, False
+        return False, "This format is not supported. Use PDF, JPG, or PNG.", None, False
 
     raw_bytes = uploaded_file.getvalue()
     if not raw_bytes:
-        return False, "No pudimos leer bien este archivo. Probá con una versión más clara del plano.", None, False
+        return False, "We couldn't read this file. Try a clearer version of the floorplan.", None, False
 
     is_image = extension in {"png", "jpg", "jpeg"}
     if is_image:
@@ -121,7 +121,7 @@ def _validate_uploaded_plan(uploaded_file) -> tuple[bool, str | None, bytes | No
             with Image.open(BytesIO(raw_bytes)) as image:
                 image.verify()
         except (UnidentifiedImageError, OSError, ValueError):
-            return False, "No pudimos leer bien este archivo. Probá con una versión más clara del plano.", None, False
+            return False, "We couldn't read this file. Try a clearer version of the floorplan.", None, False
 
     return True, None, raw_bytes, is_image
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lógica compartida: ejecutar workflows Roboflow serverless, guardar JSON y JPG.
+Shared logic: run Roboflow serverless workflows and save JSON/JPG artifacts.
 """
 from __future__ import annotations
 
@@ -46,12 +46,12 @@ def _path_relative_to_project(path: Path) -> str:
 
 
 def build_client() -> InferenceHTTPClient:
-    # Siempre el .env junto al proyecto (subprocess/IDE a veces usan otro cwd).
+    # Always load the project .env locally; production should inject environment variables.
     load_dotenv(PROJECT_ROOT / ".env")
     api_key = os.environ.get("ROBOFLOW_API_KEY", "").strip()
     if not api_key:
         print(
-            "Falta ROBOFLOW_API_KEY. Copia .env.example a .env y pega tu API key.",
+            "Missing ROBOFLOW_API_KEY. Set it in the production environment or local .env file.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -102,7 +102,7 @@ def _output_image_to_bytes(oi: object) -> bytes | None:
 def _extract_image_bytes_from_block(block: dict) -> bytes | None:
     """
     Compat con distintos nombres de salida de workflows:
-    - output_image (histórico)
+    - output_image (legacy)
     - final_image (workflow final)
     - image
     """
@@ -150,10 +150,10 @@ def extract_images_from_result_json(args: argparse.Namespace) -> None:
         for block in _workflow_blocks(wo):
             if _save_base64_output_image(block, vis_path):
                 saved = True
-                print(f"Visualización guardada: {vis_path}", file=sys.stderr)
+                print(f"Visualization saved: {vis_path}", file=sys.stderr)
                 break
         if not saved:
-            print(f"Sin imagen base64 decodificable para {inp}", file=sys.stderr)
+            print(f"No decodable base64 image found for {inp}", file=sys.stderr)
 
 
 def _summarize_json_for_print(obj: object) -> object:
@@ -168,11 +168,11 @@ def _summarize_json_for_print(obj: object) -> object:
                     raw = vv.get("value")
                     if isinstance(raw, str) and len(raw) > 80:
                         vv["value"] = (
-                            f"<base64 omitido, {len(raw)} caracteres — guardado en archivo>"
+                            f"<base64 omitted, {len(raw)} characters — saved to file>"
                         )
                     out[k] = vv
                 elif isinstance(v, str) and len(v) > 80:
-                    out[k] = f"<base64 omitido, {len(v)} caracteres — guardado en archivo>"
+                    out[k] = f"<base64 omitted, {len(v)} characters — saved to file>"
                 else:
                     out[k] = v
             else:
@@ -188,25 +188,25 @@ def build_parser(config: WorkflowScriptConfig) -> argparse.ArgumentParser:
         nargs="*",
         type=Path,
         help=(
-            "Rutas a imágenes (default: Floorplan2.png en la raíz del proyecto; "
-            "si no existe, ./images/*)"
+            "Image paths (default: Floorplan2.png in the project root; "
+            "if missing, ./images/*)"
         ),
     )
     parser.add_argument(
         "--no-cache",
         action="store_true",
-        help="Desactiva cache del serverless",
+        help="Disable serverless cache",
     )
     parser.add_argument(
         "--no-save-vis",
         action="store_true",
-        help="No guardar imagen base64 (output_image/final_image) como JPG",
+        help="Do not save base64 image output (output_image/final_image) as JPG",
     )
     parser.add_argument(
         "--vis-suffix",
         default=config.default_vis_suffix,
         help=(
-            f"Sufijo antes de .jpg en {DEFAULT_VIS_SUBDIR}/ "
+            f"Suffix before .jpg in {DEFAULT_VIS_SUBDIR}/ "
             f"(default: {config.default_vis_suffix})"
         ),
     )
@@ -214,18 +214,18 @@ def build_parser(config: WorkflowScriptConfig) -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=config.default_output_dir,
-        help=f"Carpeta para JSON e imágenes (default: {config.default_output_dir})",
+        help=f"Folder for JSON and images (default: {config.default_output_dir})",
     )
     parser.add_argument(
         "--json-file",
         default=config.default_json_name,
-        help=f"Nombre del JSON dentro de --output-dir (default: {config.default_json_name})",
+        help=f"JSON filename inside --output-dir (default: {config.default_json_name})",
     )
     parser.add_argument(
         "--from-json",
         type=Path,
         metavar="RESULT.json",
-        help="No llama a la API; lee un result.json y escribe los JPG desde output_image/final_image",
+        help="Do not call the API; read a result JSON and write JPG files from output_image/final_image",
     )
     return parser
 
@@ -252,8 +252,8 @@ def main_entry(config: WorkflowScriptConfig, argv: list[str] | None = None) -> N
         )
         if not paths:
             print(
-                f"No está {DEFAULT_TEST_IMAGE.name} ni hay imágenes en {roots_dir}. "
-                "Coloca Floorplan2.png en el proyecto o pasa rutas de imagen.",
+                f"{DEFAULT_TEST_IMAGE.name} is missing and there are no images in {roots_dir}. "
+                "Place Floorplan2.png in the project or pass image paths.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -272,7 +272,7 @@ def main_entry(config: WorkflowScriptConfig, argv: list[str] | None = None) -> N
             for block in _workflow_blocks(out):
                 if _save_base64_output_image(block, vis_path):
                     vis_saved = _path_relative_to_project(vis_path)
-                    print(f"Visualización guardada: {vis_path}", file=sys.stderr)
+                    print(f"Visualization saved: {vis_path}", file=sys.stderr)
                     break
 
         runs.append(
@@ -293,11 +293,11 @@ def main_entry(config: WorkflowScriptConfig, argv: list[str] | None = None) -> N
     }
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Raw JSON (con base64 intacto para debug/re-extract)
+    # Raw JSON (with base64 intact for debugging/re-extraction)
     json_path.write_text(
         json.dumps(document, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    print(f"JSON guardado: {json_path}", file=sys.stderr)
-    # Console output: versión resumida (sin base64 largo)
+    print(f"JSON saved: {json_path}", file=sys.stderr)
+    # Console output: summarized version (without long base64 strings)
     print(json.dumps(_summarize_json_for_print(document), indent=2, ensure_ascii=False))

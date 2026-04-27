@@ -585,7 +585,7 @@ def compute_pre_suppression_red_mask(
     return mask
 
 
-def render_stepper(current: int, labels: tuple[str, ...] = ("Cargar plano", "Configurar", "Resultado")) -> None:
+def render_stepper(current: int, labels: tuple[str, ...] = ("Upload plan", "Configure", "Result")) -> None:
     """Render a 3-step wizard stepper bar via HTML/CSS."""
     css = """
     <style>
