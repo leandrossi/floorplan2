@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: floorplan-wizard
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: PYTHONPATH=src:vendor/acala_engine/src streamlit run src/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true
+    envVars:
+      - key: APP_WORKSPACES_ROOT
+        value: /tmp/floorplan-workspaces
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: ROBOFLOW_API_KEY
+        sync: false
