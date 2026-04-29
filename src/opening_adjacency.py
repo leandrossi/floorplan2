@@ -5,10 +5,10 @@ Used by final_step04 (mutating fix) and grid_topology_validate (read-only check)
 """
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 from typing import Iterator
 
+import cv2
 import numpy as np
 
 
@@ -24,31 +24,9 @@ class OpeningViolation:
     cells: tuple[tuple[int, int], ...] = ()
 
 
-def connected_components_4(mask: np.ndarray) -> tuple[int, np.ndarray]:
-    """Return OpenCV-like 4-connected component labels without importing cv2 at app startup."""
-    mask_bool = np.asarray(mask).astype(bool)
-    h, w = mask_bool.shape
-    labels = np.zeros((h, w), dtype=np.int32)
-    current_label = 0
-
-    for start_r, start_c in zip(*np.where(mask_bool & (labels == 0))):
-        current_label += 1
-        labels[start_r, start_c] = current_label
-        q: deque[tuple[int, int]] = deque([(int(start_r), int(start_c))])
-
-        while q:
-            r, c = q.popleft()
-            for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
-                if 0 <= nr < h and 0 <= nc < w and mask_bool[nr, nc] and labels[nr, nc] == 0:
-                    labels[nr, nc] = current_label
-                    q.append((nr, nc))
-
-    return current_label + 1, labels
-
-
 def iter_opening_cc_boxes(struct_m: np.ndarray, opening_val: int) -> Iterator[tuple[int, int, int, int, int]]:
     """Yield (cc_id, y0, y1, x0, x1) per 4-connected component of opening_val."""
-    ncc, labels = connected_components_4(struct_m == opening_val)
+    ncc, labels = cv2.connectedComponents((struct_m == opening_val).astype(np.uint8), connectivity=4)
     for cc in range(1, ncc):
         ys, xs = np.where(labels == cc)
         if ys.size == 0:
@@ -175,7 +153,7 @@ def enforce_opening_adjacency(
     logs: list[str] = []
 
     for opening_val, label in ((2, "window"), (3, "door")):
-        ncc, labels = connected_components_4(out == opening_val)
+        ncc, labels = cv2.connectedComponents((out == opening_val).astype(np.uint8), connectivity=4)
         for cc in range(1, ncc):
             ys, xs = np.where(labels == cc)
             if ys.size == 0:

@@ -8,9 +8,10 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
+import cv2
 import numpy as np
 
-from opening_adjacency import connected_components_4, iter_opening_cc_boxes, scan_opening_adjacency_violations
+from opening_adjacency import iter_opening_cc_boxes, scan_opening_adjacency_violations
 
 _EXTERIOR = 0
 _WALL = 1
@@ -95,7 +96,8 @@ def _check_r1_interior_adjacent_exterior(struct: np.ndarray, max_cells: int) -> 
 def _check_r3_exterior_islands(struct: np.ndarray, max_cc_report: int) -> list[ValidationIssue]:
     """Exterior CC that does not touch grid border (courtyard / hole)."""
     h, w = struct.shape
-    ncc, labels = connected_components_4(struct == _EXTERIOR)
+    mask = (struct == _EXTERIOR).astype(np.uint8)
+    ncc, labels = cv2.connectedComponents(mask, connectivity=4)
     issues: list[ValidationIssue] = []
     for cc in range(1, ncc):
         ys, xs = np.where(labels == cc)
