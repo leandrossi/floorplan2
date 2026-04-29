@@ -197,50 +197,65 @@ def inject_app_styles() -> None:
 
         div[data-testid="stButton"] button,
         div[data-testid="stFormSubmitButton"] button,
-        div[data-testid="stFileUploader"] button {{
+        div[data-testid="stFileUploader"] button,
+        div[data-testid="stDownloadButton"] button,
+        div[data-testid="stLinkButton"] a {{
+            background: #FFFFFF !important;
+            color: {tokens.TEXT} !important;
+            border: 1px solid {tokens.BORDER} !important;
             border-radius: {tokens.RADIUS_PILL};
-            border: 1px solid {tokens.BORDER};
             font-weight: {tokens.FONT_WEIGHT_SEMIBOLD};
             font-size: 14px;
             min-height: 44px;
-            transition: transform 0.08s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+            transition: transform 0.08s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
         }}
         div[data-testid="stButton"] button:hover,
         div[data-testid="stFormSubmitButton"] button:hover,
-        div[data-testid="stFileUploader"] button:hover {{
-            border-color: {tokens.BORDER};
+        div[data-testid="stFileUploader"] button:hover,
+        div[data-testid="stDownloadButton"] button:hover,
+        div[data-testid="stLinkButton"] a:hover {{
+            background: #F9FAFB !important;
+            color: {tokens.TEXT} !important;
+            border-color: {tokens.BORDER} !important;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
             transform: translateY(-1px);
         }}
         div[data-testid="stButton"] button:focus,
         div[data-testid="stFormSubmitButton"] button:focus,
-        div[data-testid="stFileUploader"] button:focus {{
+        div[data-testid="stFileUploader"] button:focus,
+        div[data-testid="stDownloadButton"] button:focus,
+        div[data-testid="stLinkButton"] a:focus {{
             box-shadow: {tokens.FOCUS_RING};
             outline: none;
         }}
         div[data-testid="stButton"] button:disabled,
         div[data-testid="stFormSubmitButton"] button:disabled,
-        div[data-testid="stFileUploader"] button:disabled {{
-            background: {tokens.DISABLED_BG};
-            color: {tokens.DISABLED_TEXT};
-            border-color: #D6DEE9;
+        div[data-testid="stFileUploader"] button:disabled,
+        div[data-testid="stDownloadButton"] button:disabled {{
+            background: {tokens.DISABLED_BG} !important;
+            color: {tokens.DISABLED_TEXT} !important;
+            border-color: #D6DEE9 !important;
             box-shadow: none;
             transform: none;
             cursor: not-allowed;
         }}
         div[data-testid="stButton"] button[kind="primary"],
-        div[data-testid="stFormSubmitButton"] button[kind="primary"] {{
-            background: {tokens.PRIMARY};
-            border-color: {tokens.PRIMARY};
-            color: #FFFFFF;
+        div[data-testid="stFormSubmitButton"] button[kind="primary"],
+        div[data-testid="stDownloadButton"] button[kind="primary"] {{
+            background: {tokens.PRIMARY} !important;
+            border-color: {tokens.PRIMARY} !important;
+            color: #FFFFFF !important;
         }}
         div[data-testid="stButton"] button[kind="primary"]:hover,
-        div[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {{
-            background: {tokens.PRIMARY_HOVER};
-            border-color: {tokens.PRIMARY_HOVER};
+        div[data-testid="stFormSubmitButton"] button[kind="primary"]:hover,
+        div[data-testid="stDownloadButton"] button[kind="primary"]:hover {{
+            background: {tokens.PRIMARY_HOVER} !important;
+            border-color: {tokens.PRIMARY_HOVER} !important;
+            color: #FFFFFF !important;
         }}
         div[data-testid="stButton"] button[kind="primary"]:focus,
-        div[data-testid="stFormSubmitButton"] button[kind="primary"]:focus {{
+        div[data-testid="stFormSubmitButton"] button[kind="primary"]:focus,
+        div[data-testid="stDownloadButton"] button[kind="primary"]:focus {{
             box-shadow: {tokens.FOCUS_RING};
         }}
         div[data-testid="stFileUploader"] section {{
@@ -248,9 +263,23 @@ def inject_app_styles() -> None:
             border-color: #CBD5E1;
             background: #FFFFFF;
         }}
-        div[data-testid="stFileUploader"] button {{
-            background: #FFFFFF;
-            color: {tokens.TEXT};
+        @media (prefers-color-scheme: dark) {{
+            div[data-testid="stButton"] button,
+            div[data-testid="stFormSubmitButton"] button,
+            div[data-testid="stFileUploader"] button,
+            div[data-testid="stDownloadButton"] button,
+            div[data-testid="stLinkButton"] a {{
+                background: #FFFFFF !important;
+                color: {tokens.TEXT} !important;
+                border: 1px solid {tokens.BORDER} !important;
+            }}
+            div[data-testid="stButton"] button[kind="primary"],
+            div[data-testid="stFormSubmitButton"] button[kind="primary"],
+            div[data-testid="stDownloadButton"] button[kind="primary"] {{
+                background: {tokens.PRIMARY} !important;
+                border-color: {tokens.PRIMARY} !important;
+                color: #FFFFFF !important;
+            }}
         }}
         div[data-testid="stAlert"] {{
             border-radius: 16px;
