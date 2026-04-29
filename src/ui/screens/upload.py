@@ -252,6 +252,9 @@ def render(controller) -> None:
     if feedback == "success":
         st.success("Floorplan uploaded correctly. We’re ready to analyze it.")
 
+    if state.last_error:
+        st.error(f"We couldn’t finish the analysis: {state.last_error}")
+
     main_col, side_col = st.columns([1.5, 1], gap="large")
     with main_col:
         st.markdown('<section class="wizard-card">', unsafe_allow_html=True)
