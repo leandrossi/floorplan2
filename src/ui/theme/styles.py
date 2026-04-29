@@ -195,7 +195,9 @@ def inject_app_styles() -> None:
             margin: 0;
         }}
 
-        div[data-testid="stButton"] button {{
+        div[data-testid="stButton"] button,
+        div[data-testid="stFormSubmitButton"] button,
+        div[data-testid="stFileUploader"] button {{
             border-radius: {tokens.RADIUS_PILL};
             border: 1px solid {tokens.BORDER};
             font-weight: {tokens.FONT_WEIGHT_SEMIBOLD};
@@ -203,16 +205,22 @@ def inject_app_styles() -> None:
             min-height: 44px;
             transition: transform 0.08s ease, box-shadow 0.15s ease, border-color 0.15s ease;
         }}
-        div[data-testid="stButton"] button:hover {{
+        div[data-testid="stButton"] button:hover,
+        div[data-testid="stFormSubmitButton"] button:hover,
+        div[data-testid="stFileUploader"] button:hover {{
             border-color: {tokens.BORDER};
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
             transform: translateY(-1px);
         }}
-        div[data-testid="stButton"] button:focus {{
+        div[data-testid="stButton"] button:focus,
+        div[data-testid="stFormSubmitButton"] button:focus,
+        div[data-testid="stFileUploader"] button:focus {{
             box-shadow: {tokens.FOCUS_RING};
             outline: none;
         }}
-        div[data-testid="stButton"] button:disabled {{
+        div[data-testid="stButton"] button:disabled,
+        div[data-testid="stFormSubmitButton"] button:disabled,
+        div[data-testid="stFileUploader"] button:disabled {{
             background: {tokens.DISABLED_BG};
             color: {tokens.DISABLED_TEXT};
             border-color: #D6DEE9;
@@ -220,22 +228,29 @@ def inject_app_styles() -> None:
             transform: none;
             cursor: not-allowed;
         }}
-        div[data-testid="stButton"] button[kind="primary"] {{
+        div[data-testid="stButton"] button[kind="primary"],
+        div[data-testid="stFormSubmitButton"] button[kind="primary"] {{
             background: {tokens.PRIMARY};
             border-color: {tokens.PRIMARY};
             color: #FFFFFF;
         }}
-        div[data-testid="stButton"] button[kind="primary"]:hover {{
+        div[data-testid="stButton"] button[kind="primary"]:hover,
+        div[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {{
             background: {tokens.PRIMARY_HOVER};
             border-color: {tokens.PRIMARY_HOVER};
         }}
-        div[data-testid="stButton"] button[kind="primary"]:focus {{
+        div[data-testid="stButton"] button[kind="primary"]:focus,
+        div[data-testid="stFormSubmitButton"] button[kind="primary"]:focus {{
             box-shadow: {tokens.FOCUS_RING};
         }}
         div[data-testid="stFileUploader"] section {{
             border-radius: 18px;
             border-color: #CBD5E1;
             background: #FFFFFF;
+        }}
+        div[data-testid="stFileUploader"] button {{
+            background: #FFFFFF;
+            color: {tokens.TEXT};
         }}
         div[data-testid="stAlert"] {{
             border-radius: 16px;

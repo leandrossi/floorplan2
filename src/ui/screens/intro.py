@@ -9,15 +9,12 @@ from domain.enums import WizardScreen
 
 VIDEO_PATH = Path(__file__).resolve().parents[3] / "assets" / "icons" / "Video" / "VideoMaxV2.mp4"
 HOUSE_PATH = Path(__file__).resolve().parents[3] / "assets" / "icons" / "house.png"
-WATCH_TRIGGER_KEY = "intro_watch_trigger"
 WATCHED_KEY = "introVideoWatched"
 SKIPPED_KEY = "introSkipped"
 WATCHED_QUERY_KEY = "intro_video_watched"
 
 
 def render(controller) -> None:
-    if WATCH_TRIGGER_KEY not in st.session_state:
-        st.session_state[WATCH_TRIGGER_KEY] = 0
     if WATCHED_KEY not in st.session_state:
         st.session_state[WATCHED_KEY] = False
     if SKIPPED_KEY not in st.session_state:
@@ -433,15 +430,11 @@ def render(controller) -> None:
             st.markdown('<div class="welcome-video-shell" id="intro-video-anchor">', unsafe_allow_html=True)
 
             video_available = VIDEO_PATH.exists()
-            play_on_render = st.session_state[WATCH_TRIGGER_KEY] > 0
             if video_available:
                 st.video(
                     str(VIDEO_PATH),
-                    autoplay=play_on_render,
                     width="stretch",
                 )
-                if play_on_render:
-                    st.session_state[WATCHED_KEY] = True
             else:
                 st.markdown(
                     '<p class="welcome-video-error">The introduction video couldn’t be loaded. You can continue with the guided setup.</p>',
@@ -471,7 +464,6 @@ def render(controller) -> None:
                 )
             st.markdown("</div>", unsafe_allow_html=True)
     if watch_clicked:
-        st.session_state[WATCH_TRIGGER_KEY] += 1
         components.html(
             """
             <script>
@@ -482,17 +474,12 @@ def render(controller) -> None:
                 anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
               }
               if (vid) {
-                const attempt = vid.play();
-                if (attempt && typeof attempt.then === 'function') {
-                  attempt.catch(() => {});
-                }
                 vid.focus({ preventScroll: true });
               }
             </script>
             """,
             height=0,
         )
-        st.rerun()
 
     if go_wizard:
         st.session_state[SKIPPED_KEY] = True
